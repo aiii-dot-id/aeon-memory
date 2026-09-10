@@ -3,10 +3,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"runtime/debug"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,9 +24,16 @@ func TestNativeHarnessChild(t *testing.T) {
 	if os.Getenv("MEMORY_TEST_CHILD") != "1" {
 		return
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "CHILD_PANIC: %v\n%s", r, debug.Stack())
+		}
+	}()
 	if err := newMemoryPlugin().Serve("memory-test-ready"); err != nil {
+		fmt.Fprintf(os.Stderr, "CHILD_SERVE_ERROR: %v\n", err)
 		os.Exit(2)
 	}
+	fmt.Fprintln(os.Stderr, "CHILD_SERVE_OK")
 	os.Exit(0) // testing's PASS line must not enter the framed stream.
 }
 
@@ -39,24 +51,61 @@ func respondNative(t *testing.T, host func([]byte) ([]byte, error), frame []byte
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd.Stderr = os.Stderr
+	var childErr bytes.Buffer
+	cmd.Stderr = &childErr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	waited := false
+	var tail bytes.Buffer
+	dump := func() {
+		n := tail.Len()
+		start := n - 300
+		if start < 0 {
+			start = 0
+		}
+		t.Logf("harness tail dump (%d bytes kept, showing last 300):", n)
+		for i := start; i < n; i += 16 {
+			e := i + 16
+			if e > n {
+				e = n
+			}
+			row := tail.Bytes()[i:e]
+			hexs := make([]string, e-i)
+			as := make([]string, e-i)
+			for j, b := range row {
+				hexs[j] = fmt.Sprintf("%02x", b)
+				if b >= 0x20 && b < 0x7f {
+					as[j] = string(rune(b))
+				} else {
+					as[j] = "."
+                }
+			}
+			t.Logf("%04x  %-48s  %s", i, strings.Join(hexs, " "), strings.Join(as, ""))
+		}
+	}
 	defer func() {
 		in.Close()
 		if !waited {
 			cancel()
-			_ = cmd.Wait()
+			werr := cmd.Wait()
+			if werr != nil {
+				t.Logf("child exit after cancel: %v", werr)
+			}
 		}
 	}()
 	if err := sdk.WriteFrame(in, frame, sdk.MaxControlFrameBytes); err != nil {
 		t.Fatal(err)
 	}
+	rd := io.TeeReader(out, &tail)
 	for {
-		reply, err := sdk.ReadFrame(out, sdk.MaxControlFrameBytes)
+		reply, err := sdk.ReadFrame(rd, sdk.MaxControlFrameBytes)
 		if err != nil {
+			dump()
+			in.Close()
+			rest, rerr := io.ReadAll(rd)
+			t.Logf("stream remainder after error (read err=%v, %d bytes): %q", rerr, len(rest), rest)
+			t.Logf("child stderr: %q", childErr.String())
 			t.Fatalf("native read: %v", err)
 		}
 		var obj map[string]json.RawMessage

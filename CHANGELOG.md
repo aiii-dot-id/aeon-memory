@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.1 (2026-09-12)
+
+- Pinned notes (B5): `store` accepts `pinned` and a pinned note is
+  never chosen for reclaim at capacity; explicit `evict` is the only
+  way out. A full set refuses with `WORKING_SET_AT_CAPACITY_PINNED`
+  instead of displacing silently. `stats` reports the pinned count,
+  and `get`, `search`, `recall` and `recent` outputs carry `pinned`.
+- Oldest-mode retrieval (B6): `recent` accepts `mode=oldest`, a pure
+  read walking the recency order from the tail; both modes leave the
+  order untouched and the mode is echoed. Unknown modes are refused.
+- A store that fails because the reclaim's read or delete was refused
+  now reports `WORKING_SET_RECLAIM_REFUSED` carrying the store's own
+  reason and code, no longer the put's `KV_QUOTA_EXCEEDED`: a store
+  refusing a delete and a genuine quota are different diagnoses and
+  ask different questions of the caller.
+- Fixed a panic in the capacity-refusal path: the outer error was
+  passed to the refusal writer where the store's refusal was meant.
+- The native harness keeps its diagnostic instruments: the reply-frame
+  tail is recorded and dumped as hex on a stream error, the child's
+  stderr is captured separately, and a panicking child reports its
+  stack instead of poisoning the frame stream. All are silent when
+  green.
+
 ## 0.5.0 (2026-09-10), the first public release
 
 - Tags are read through the SDK's string-array reader. Non-strings,

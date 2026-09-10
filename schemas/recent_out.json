@@ -34,12 +34,21 @@
           "evicted": {
             "type": "boolean",
             "description": "True when the note is soft-evicted: readable by id, absent from search, recent and recall."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "True when the note is exempt from capacity reclaim; eviction is its only exit."
           }
         }
       }
     },
     "count": {
       "type": "integer"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["mru", "oldest"],
+      "description": "The order the notes were returned in: mru (default) or oldest."
     }
   },
   "required": [

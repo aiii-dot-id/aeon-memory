@@ -56,6 +56,7 @@
 package main
 
 import (
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -128,6 +129,12 @@ func encodeNote(n *note) string {
 	}
 	b.WriteString(`,"evicted":`)
 	if n.evicted {
+		b.WriteString("true")
+	} else {
+		b.WriteString("false")
+	}
+	b.WriteString(`,"pinned":`)
+	if n.pinned {
 		b.WriteString("true")
 	} else {
 		b.WriteString("false")
@@ -244,19 +251,32 @@ func (m *meta) touch(id int64) {
 	m.recent = append([]int64{id}, m.recent...)
 }
 
+// reclaimResult is the three-way verdict of a reclaim attempt: a note
+// was removed, nothing was removable, or the store refused a read or
+// delete mid-walk. The refusal carries the store's own words so the
+// receipt can name them.
+type reclaimResult struct {
+	note    *note
+	ok      bool
+	none    bool  // nothing removable: every alive note pinned, or a phantom index
+	pinned  bool  // none, because every alive note is pinned
+	refused error // the store refused a read or delete; the next store retries
+}
+
 // reclaim frees one key slot at capacity and returns the note it
 // removed. Queued zombies go first, oldest eviction first; a queue
 // entry whose key is already gone is dropped and the walk continues.
 // Otherwise the least recently used alive note, the tail of the index,
-// goes. A read or delete the store refuses stops the walk with nothing
-// de-indexed: a note that still holds a key stays visible, and the
-// next store tries again.
-func (m *meta) reclaim() (*note, bool) {
+// goes. Pinned notes are never reclaim victims: explicit evict is
+// their only way out. A read or delete the store refuses stops the
+// walk with nothing de-indexed: a note that still holds a key stays
+// visible, and the next store tries again.
+func (m *meta) reclaim() reclaimResult {
 	for len(m.zombieq) > 0 {
 		z := m.zombieq[0]
 		n, found, err := loadNote(z)
 		if err != nil {
-			return nil, false
+			return reclaimResult{refused: err}
 		}
 		if !found {
 			m.zombieq = m.zombieq[1:]
@@ -264,29 +284,34 @@ func (m *meta) reclaim() (*note, bool) {
 			continue
 		}
 		if err := deleteNote(z); err != nil {
-			return nil, false
+			return reclaimResult{refused: err}
 		}
 		m.zombieq = m.zombieq[1:]
 		m.removeFromRecent(z)
-		return n, true
+		return reclaimResult{note: n, ok: true}
 	}
+	pinned := 0
 	for i := len(m.recent) - 1; i >= 0; i-- {
 		id := m.recent[i]
 		n, found, err := loadNote(id)
 		if err != nil {
-			return nil, false
+			return reclaimResult{refused: err}
 		}
 		if !found {
 			m.recent = append(m.recent[:i], m.recent[i+1:]...)
 			continue
 		}
+		if n.pinned {
+			pinned++
+			continue
+		}
 		if err := deleteNote(id); err != nil {
-			return nil, false
+			return reclaimResult{refused: err}
 		}
 		m.recent = append(m.recent[:i], m.recent[i+1:]...)
-		return n, true
+		return reclaimResult{note: n, ok: true}
 	}
-	return nil, false
+	return reclaimResult{none: true, pinned: pinned > 0}
 }
 
 // ─── Notes ────────────────────────────────────────────────────────
@@ -299,6 +324,7 @@ type note struct {
 	createdMs int64
 	updatedMs int64 // 0 until revised
 	evicted   bool
+	pinned    bool // shielded from reclaim; explicit evict is the only way out
 }
 
 func loadNote(id int64) (*note, bool, error) {
@@ -318,6 +344,7 @@ func loadNote(id int64) (*note, bool, error) {
 	n.createdMs, _ = obj.Int("created_ms")
 	n.updatedMs, _ = obj.Int("updated_ms")
 	n.evicted, _ = obj.Bool("evicted")
+	n.pinned, _ = obj.Bool("pinned") // false for pre-0.5.1 notes, which never stored the field
 	return n, true, nil
 }
 
@@ -350,6 +377,7 @@ func noteToMap(n *note) map[string]any {
 	if n.updatedMs > 0 {
 		m["updated_ms"] = n.updatedMs
 	}
+	m["pinned"] = n.pinned
 	return m
 }
 
@@ -443,6 +471,32 @@ func scopeReport(s string) string {
 	return s
 }
 
+// Capacity and reclaim refusals are the plugin's own structured
+// verdicts, not the store's: the store never saw the write. They
+// distinguish what happened from what the caller should do next —
+// evict explicitly versus retry later.
+var (
+	errCapacityPinned = errors.New("working set at capacity: every alive note is pinned")
+	errCapacityNone   = errors.New("working set at capacity: nothing reclaimable")
+)
+
+// writeRefusalReason reports a refusal the plugin itself decided, with
+// a reason code of its own naming, carrying whatever displacement
+// already happened on the way.
+func writeRefusalReason(err error, code string, detail string, displaced map[string]any) (any, error) {
+	out := map[string]any{
+		"stored":     false,
+		"refused":    true,
+		"reasonCode": code,
+		"detail":     detail,
+	}
+	if displaced != nil {
+		out["displaced"] = displaced
+	}
+	_ = err // the sentinel names the condition; the detail carries the words
+	return out, nil
+}
+
 // ─── Registration ─────────────────────────────────────────────────
 
 func init() { newMemoryPlugin().Run() }
@@ -451,7 +505,7 @@ func newMemoryPlugin() *sdk.Plugin {
 	p := sdk.New(pluginID)
 
 	p.Describe("store", sdk.Descriptor{
-		Summary:      "Keep a working note: content, optional tags and project. At capacity one slot is reclaimed first and the displaced note is reported.",
+		Summary:      "Keep a working note: content, optional tags, project and pinned. At capacity one slot is reclaimed first and the displaced note is reported; pinned notes are never displaced, and a full pinned set or a refused reclaim is reported as a refusal.",
 		Input:        "schemas/store_in.json",
 		Output:       "schemas/store_out.json",
 		Effects:      sdk.EffectsWriteLocal,
@@ -466,6 +520,7 @@ func newMemoryPlugin() *sdk.Plugin {
 		if err != nil {
 			return nil, err
 		}
+		pinned, _ := c.Args().Bool("pinned")
 		project, _ := c.Args().String("project")
 		nowMs, err := hostClock(c)
 		if err != nil {
@@ -478,8 +533,19 @@ func newMemoryPlugin() *sdk.Plugin {
 		}
 		var displaced map[string]any
 		if len(m.recent) >= maxNotes {
-			if victim, ok := m.reclaim(); ok {
-				displaced = map[string]any{"id": victim.id, "evicted": victim.evicted}
+			r := m.reclaim()
+			switch {
+			case r.ok:
+				displaced = map[string]any{"id": r.note.id, "evicted": r.note.evicted}
+			case r.none && r.pinned:
+				return writeRefusalReason(errCapacityPinned, "WORKING_SET_AT_CAPACITY_PINNED",
+					"every alive note is pinned; explicit evict is the only way to make room", displaced)
+			case r.none:
+				return writeRefusalReason(errCapacityNone, "WORKING_SET_AT_CAPACITY_NONE",
+					"the working set is at capacity but holds nothing reclaimable", displaced)
+			default:
+				return writeRefusalReason(r.refused, "WORKING_SET_RECLAIM_REFUSED",
+					"the key-value store refused a read or delete during reclaim: "+r.refused.Error(), displaced)
 			}
 		}
 
@@ -493,7 +559,7 @@ func newMemoryPlugin() *sdk.Plugin {
 			return writeRefusal(err, displaced)
 		}
 
-		n := &note{id: id, content: content, tags: tags, project: project, createdMs: nowMs}
+		n := &note{id: id, content: content, tags: tags, project: project, createdMs: nowMs, pinned: pinned}
 		if err := saveNote(n); err != nil {
 			// The note never landed: return the reservation.
 			m.removeFromRecent(id)
@@ -590,7 +656,7 @@ func newMemoryPlugin() *sdk.Plugin {
 	})
 
 	p.Describe("recent", sdk.Descriptor{
-		Summary:      "The most recently used alive notes, most recent first. A pure read: it does not reorder.",
+		Summary:      "The most recently used alive notes, most recent first; mode=oldest returns them oldest-first from the tail of the same recency order. A pure read in both modes: it never reorders.",
 		Input:        "schemas/recent_in.json",
 		Output:       "schemas/recent_out.json",
 		Effects:      sdk.EffectsReadInternal,
@@ -599,13 +665,27 @@ func newMemoryPlugin() *sdk.Plugin {
 	p.Handle("recent", func(c sdk.Call) (any, error) {
 		project, _ := c.Args().String("project")
 		limit := limitArgument(c)
+		mode, modeOK := c.Args().String("mode")
+		if mode == "" {
+			mode, modeOK = "mru", true
+		}
+		if !modeOK || (mode != "mru" && mode != "oldest") {
+			return nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "recent mode must be \"mru\" (default) or \"oldest\"")
+		}
 
 		m, err := loadMeta()
 		if err != nil {
 			return nil, err
 		}
+		order := m.recent
+		if mode == "oldest" {
+			order = make([]int64, len(m.recent))
+			for i, id := range m.recent {
+				order[len(m.recent)-1-i] = id
+			}
+		}
 		notes := make([]any, 0, limit)
-		for _, id := range m.recent {
+		for _, id := range order {
 			if int64(len(notes)) >= limit {
 				break
 			}
@@ -621,7 +701,7 @@ func newMemoryPlugin() *sdk.Plugin {
 			}
 			notes = append(notes, noteToMap(n))
 		}
-		return map[string]any{"notes": notes, "count": len(notes)}, nil
+		return map[string]any{"notes": notes, "count": len(notes), "mode": mode}, nil
 	})
 
 	p.Describe("get", sdk.Descriptor{
@@ -806,7 +886,7 @@ func newMemoryPlugin() *sdk.Plugin {
 	})
 
 	p.Describe("stats", sdk.Descriptor{
-		Summary:      "Working-set statistics with honest scopes: occupancy (alive plus evicted notes still holding slots), alive, evicted, capacity, remaining, the reclaim queue, per-project counts and the store's scope verdict.",
+		Summary:      "Working-set statistics with honest scopes: occupancy (alive plus evicted notes still holding slots), alive, pinned (alive notes exempt from reclaim), evicted, capacity, remaining, the reclaim queue, per-project counts and the store's scope verdict.",
 		Input:        "schemas/stats_in.json",
 		Output:       "schemas/stats_out.json",
 		Effects:      sdk.EffectsReadInternal,
@@ -817,7 +897,7 @@ func newMemoryPlugin() *sdk.Plugin {
 		if err != nil {
 			return nil, err
 		}
-		alive, zombies := 0, 0
+		alive, zombies, pinned := 0, 0, 0
 		perProject := map[string]int{}
 		for _, id := range m.recent {
 			n, found, err := loadNote(id)
@@ -832,6 +912,9 @@ func newMemoryPlugin() *sdk.Plugin {
 				continue
 			}
 			alive++
+			if n.pinned {
+				pinned++
+			}
 			if n.project != "" {
 				perProject[n.project]++
 			}
@@ -858,6 +941,7 @@ func newMemoryPlugin() *sdk.Plugin {
 		return map[string]any{
 			"occupancy": occupancy,
 			"alive":     alive,
+			"pinned":    pinned,
 			"evicted":   zombies,
 			"capacity":  maxNotes,
 			"remaining": remaining,

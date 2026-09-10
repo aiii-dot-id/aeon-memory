@@ -10,6 +10,10 @@
     "alive": {
       "type": "integer"
     },
+    "pinned": {
+      "type": "integer",
+      "description": "Alive notes exempt from capacity reclaim."
+    },
     "evicted": {
       "type": "integer",
       "description": "Soft-evicted notes still holding slots."

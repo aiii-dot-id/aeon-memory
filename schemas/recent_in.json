@@ -7,6 +7,12 @@
       "type": "string",
       "description": "Optional project scope."
     },
+    "mode": {
+      "type": "string",
+      "enum": ["mru", "oldest"],
+      "default": "mru",
+      "description": "mru: most recently used first. oldest: least recently used first, from the tail of the same recency order. Both are pure reads; neither reorders."
+    },
     "limit": {
       "type": "integer",
       "minimum": 1,

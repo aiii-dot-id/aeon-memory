@@ -29,6 +29,7 @@ type fakeKV struct {
 	failedPutKey string
 
 	failNextDelete *map[string]any // the next kv.delete answers this instead of deleting
+	failDeleteKey  string          // when set, every kv.delete of this key fails until cleared
 	maxKeys        int             // 0 = unlimited; otherwise a put of a NEW key beyond it is refused
 	scope          string          // reported on every put; default "persistent"
 }
@@ -88,6 +89,13 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 			fail := *f.failNextDelete
 			f.failNextDelete = nil
 			return json.Marshal(fail)
+		}
+		if f.failDeleteKey != "" && f.failDeleteKey == key {
+			return json.Marshal(map[string]any{
+				"status":     "failed",
+				"reason":     "injected sustained delete failure",
+				"reasonCode": "KV_DELETE_REFUSED",
+			})
 		}
 		_, found := f.store[key]
 		delete(f.store, key)
@@ -629,8 +637,15 @@ func TestARefusedDeleteKeepsTheNoteVisible(t *testing.T) {
 	fail := map[string]any{"status": "failed", "reason": "the store declined the delete", "reasonCode": "KV_DELETE_FAILED"}
 	fkv.failNextDelete = &fail
 	r := invoke(t, fkv, "store", map[string]any{"content": "arrives while the delete is refused"})
-	if r["stored"] != false || r["refused"] != true || r["reasonCode"] != "KV_QUOTA_EXCEEDED" {
+	// Since 0.5.1 a store that fails because the reclaim's delete was
+	// refused reports WORKING_SET_RECLAIM_REFUSED carrying the store's
+	// own reason, not the put's KV_QUOTA_EXCEEDED: the two conditions
+	// ask different questions of the caller (retry now vs never).
+	if r["stored"] != false || r["refused"] != true || r["reasonCode"] != "WORKING_SET_RECLAIM_REFUSED" {
 		t.Fatalf("store during a refused delete = %v, want a structured refusal", r)
+	}
+	if d, _ := r["detail"].(string); !strings.Contains(d, "KV_DELETE_FAILED") {
+		t.Fatalf("refusal detail should carry the store's delete reason, got %q", d)
 	}
 	if _, has := r["displaced"]; has {
 		t.Fatalf("nothing was displaced, yet: %v", r)
@@ -958,5 +973,226 @@ func TestEveryOperationShipsItsSchemas(t *testing.T) {
 	}
 	for name := range want {
 		t.Errorf("schemas/%s is missing", name)
+	}
+}
+
+/* ─── Pinned and oldest-mode (0.5.1) ─────────────────────────────── */
+
+func equalIDs(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+/*
+	A pinned note is shielded from capacity reclaim even when it is the
+
+least recently used note in the index: the walk skips it, takes the
+oldest unpinned note instead, and the pinned note stays retrievable.
+*/
+func TestPinnedNoteIsNotReclaimedAtCapacity(t *testing.T) {
+	fkv := newFakeKV()
+	fill(t, fkv, maxNotes-1, "note")
+	r := invoke(t, fkv, "store", map[string]any{"content": "the pinned one", "pinned": true})
+	pinnedID := r["id"].(float64)
+
+	for i := 1; i < maxNotes; i++ {
+		invoke(t, fkv, "get", map[string]any{"id": i})
+		fkv.clock++
+	}
+
+	r = invoke(t, fkv, "store", map[string]any{"content": "one more"})
+	displaced, _ := r["displaced"].(map[string]any)
+	if displaced == nil {
+		t.Fatalf("store at capacity displaced nothing: %v", r)
+	}
+	if displaced["id"] == pinnedID {
+		t.Fatalf("the pinned note was displaced: %v", r)
+	}
+	if displaced["id"] != float64(1) {
+		t.Fatalf("expected the oldest unpinned note (1), got %v", displaced["id"])
+	}
+	g := invoke(t, fkv, "get", map[string]any{"id": pinnedID})
+	if g["found"] != true || g["pinned"] != true {
+		t.Fatalf("pinned note not retrievable after reclaim: %v", g)
+	}
+}
+
+/*
+	When every alive note is pinned, a store at capacity refuses with
+
+the pinned refusal code, reports stored=false, and displaces nothing —
+a structured envelope, not a transport failure.
+*/
+func TestAllPinnedRefusesWithCode(t *testing.T) {
+	fkv := newFakeKV()
+	for i := 0; i < maxNotes; i++ {
+		invoke(t, fkv, "store", map[string]any{
+			"content": fmt.Sprintf("pinned note %d", i),
+			"pinned":  true,
+		})
+		fkv.clock++
+	}
+
+	result := call(t, fkv, "store", map[string]any{"content": "one too many"})
+	if result["status"] != "succeeded" {
+		t.Fatalf("a capacity refusal is a structured envelope, not a transport failure: %v", result)
+	}
+	or, _ := result["operation_result"].(map[string]any)
+	if or == nil || or["refused"] != true {
+		t.Fatalf("expected a refused envelope: %v", result)
+	}
+	if or["reasonCode"] != "WORKING_SET_AT_CAPACITY_PINNED" {
+		t.Fatalf("reasonCode = %v", or["reasonCode"])
+	}
+	if or["stored"] != false {
+		t.Fatalf("a refused store must report stored=false: %v", or)
+	}
+	if _, has := or["displaced"]; has {
+		t.Fatalf("a pinned refusal must not claim a displaced note: %v", or)
+	}
+	if d, _ := or["detail"].(string); d == "" {
+		t.Fatalf("the refusal carries no detail: %v", or)
+	}
+}
+
+/*
+	A store refusing a read or delete during reclaim produces a
+
+structured refusal naming the store's own reason, de-indexes nothing,
+and burns no id reservation; the next store retries the same reclaim
+and succeeds.
+*/
+func TestReclaimRefusedIsStructuredAndRetries(t *testing.T) {
+	fkv := newFakeKV()
+	fill(t, fkv, maxNotes, "note")
+	fkv.failDeleteKey = "n/1"
+
+	result := call(t, fkv, "store", map[string]any{"content": "while refused"})
+	if result["status"] != "succeeded" {
+		t.Fatalf("a reclaim refusal is a structured envelope, not a transport failure: %v", result)
+	}
+	or, _ := result["operation_result"].(map[string]any)
+	if or == nil || or["refused"] != true || or["reasonCode"] != "WORKING_SET_RECLAIM_REFUSED" {
+		t.Fatalf("expected WORKING_SET_RECLAIM_REFUSED, got: %v", result)
+	}
+	detail, _ := or["detail"].(string)
+	if !strings.Contains(detail, "KV_DELETE_REFUSED") || !strings.Contains(detail, "injected sustained delete failure") {
+		t.Fatalf("the store's own reason was lost: %q", detail)
+	}
+	if _, ok := fkv.store["n/1"]; !ok {
+		t.Fatal("the refused delete removed the key anyway")
+	}
+	rec := invoke(t, fkv, "recent", map[string]any{"mode": "oldest", "limit": 5})
+	notes := rec["notes"].([]any)
+	if len(notes) == 0 || notes[0].(map[string]any)["id"] != float64(1) {
+		t.Fatalf("note 1 must head the oldest walk after a refused reclaim (the default recent view clamps to %d and cannot see the tail): %v", maxLimit, notes)
+	}
+
+	fkv.failDeleteKey = ""
+	r := invoke(t, fkv, "store", map[string]any{"content": "after clearing"})
+	if r["stored"] != true || r["id"] != float64(maxNotes+1) {
+		t.Fatalf("retry after a refused reclaim (no id may be burned): %v", r)
+	}
+	displaced, _ := r["displaced"].(map[string]any)
+	if displaced == nil || displaced["id"] != float64(1) {
+		t.Fatalf("the retry should reclaim note 1: %v", r)
+	}
+}
+
+/*
+	mode=oldest walks the same recency order from the tail; the default
+
+order and the mode echo are unchanged; an unknown mode is refused.
+*/
+func TestRecentOldestMode(t *testing.T) {
+	fkv := newFakeKV()
+	fill(t, fkv, 5, "note")
+	invoke(t, fkv, "get", map[string]any{"id": 1})
+	invoke(t, fkv, "get", map[string]any{"id": 2})
+
+	ids := func(or map[string]any) []int64 {
+		out := []int64{}
+		for _, ni := range or["notes"].([]any) {
+			out = append(out, int64(ni.(map[string]any)["id"].(float64)))
+		}
+		return out
+	}
+
+	mru := invoke(t, fkv, "recent", map[string]any{})
+	if got := ids(mru); !equalIDs(got, []int64{2, 1, 5, 4, 3}) {
+		t.Fatalf("default order = %v", got)
+	}
+	if mru["mode"] != "mru" {
+		t.Fatalf("default mode echo = %v", mru["mode"])
+	}
+
+	oldest := invoke(t, fkv, "recent", map[string]any{"mode": "oldest"})
+	if got := ids(oldest); !equalIDs(got, []int64{3, 4, 5, 1, 2}) {
+		t.Fatalf("oldest order = %v", got)
+	}
+	if oldest["mode"] != "oldest" {
+		t.Fatalf("mode echo = %v", oldest["mode"])
+	}
+
+	refused(t, fkv, "recent", map[string]any{"mode": "invalid"})
+}
+
+/* stats counts pinned notes separately from alive. */
+func TestStatsReportsPinned(t *testing.T) {
+	fkv := newFakeKV()
+	fill(t, fkv, 3, "note")
+	invoke(t, fkv, "store", map[string]any{"content": "pinned note", "pinned": true})
+
+	s := invoke(t, fkv, "stats", map[string]any{})
+	if s["pinned"] != float64(1) {
+		t.Fatalf("stats.pinned = %v", s["pinned"])
+	}
+	if s["alive"] != float64(4) {
+		t.Fatalf("stats.alive = %v", s["alive"])
+	}
+}
+
+/*
+	Eviction is a pinned note's only exit: an evicted pinned note stays
+
+readable by id, leaves search and recent, and is reclaimed first —
+before any alive note — at the next capacity store.
+*/
+func TestEvictExitsPinned(t *testing.T) {
+	fkv := newFakeKV()
+	fill(t, fkv, maxNotes-1, "note")
+	r := invoke(t, fkv, "store", map[string]any{"content": "pinned and then evicted", "pinned": true})
+	pinnedID := r["id"].(float64)
+
+	e := invoke(t, fkv, "evict", map[string]any{"id": pinnedID})
+	if e["evicted"] != true {
+		t.Fatalf("evict = %v", e)
+	}
+	g := invoke(t, fkv, "get", map[string]any{"id": pinnedID})
+	if g["found"] != true || g["evicted"] != true {
+		t.Fatalf("soft-evicted pinned note not readable by id: %v", g)
+	}
+
+	r = invoke(t, fkv, "store", map[string]any{"content": "takes the zombie slot"})
+	displaced, _ := r["displaced"].(map[string]any)
+	if displaced == nil || displaced["id"] != pinnedID {
+		t.Fatalf("the evicted pinned note should be reclaimed first: %v", r)
+	}
+	if displaced["evicted"] != true {
+		t.Fatalf("the displaced receipt should name it evicted: %v", displaced)
+	}
+	if _, ok := fkv.store[fmt.Sprintf("n/%d", int(pinnedID))]; ok {
+		t.Fatal("the reclaimed note's key survived the reclaim")
+	}
+	g = invoke(t, fkv, "get", map[string]any{"id": pinnedID})
+	if g["found"] != false {
+		t.Fatalf("a reclaimed note must be gone: %v", g)
 	}
 }

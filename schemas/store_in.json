@@ -19,6 +19,11 @@
     "project": {
       "type": "string",
       "description": "Optional project scope."
+    },
+    "pinned": {
+      "type": "boolean",
+      "default": false,
+      "description": "Exempt this note from capacity reclaim. A pinned note is never displaced by a new store; eviction is its only exit."
     }
   },
   "required": [
