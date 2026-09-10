@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "search input",
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Whitespace-separated terms matched against content and tags, case-insensitively."
+    },
+    "project": {
+      "type": "string",
+      "description": "Optional project scope."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10,
+      "description": "Maximum notes to return."
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "additionalProperties": false
+}

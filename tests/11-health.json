@@ -1,0 +1,9 @@
+{
+  "name": "health finds nothing to repair",
+  "operation": "health",
+  "arguments": {},
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"healthy\":true"
+  }
+}

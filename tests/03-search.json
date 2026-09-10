@@ -1,0 +1,11 @@
+{
+  "name": "search finds one note for 'scanned' and says so",
+  "operation": "search",
+  "arguments": {
+    "query": "scanned"
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"matched\":1"
+  }
+}

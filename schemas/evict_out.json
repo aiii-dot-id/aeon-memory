@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "evict output",
+  "type": "object",
+  "properties": {
+    "evicted": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "integer"
+    },
+    "reason": {
+      "type": "string",
+      "description": "not found, or already evicted."
+    }
+  },
+  "required": [
+    "evicted"
+  ]
+}

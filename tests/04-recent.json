@@ -1,0 +1,11 @@
+{
+  "name": "recent honors the limit",
+  "operation": "recent",
+  "arguments": {
+    "limit": 1
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"count\":1"
+  }
+}

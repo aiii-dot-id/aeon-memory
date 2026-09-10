@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "recent input",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "Optional project scope."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10,
+      "description": "Maximum notes to return."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "update output",
+  "type": "object",
+  "properties": {
+    "updated": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "integer"
+    },
+    "updated_ms": {
+      "type": "integer"
+    },
+    "created_ms": {
+      "type": "integer",
+      "description": "Preserved from the original note."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why nothing was updated: not found, evicted, or no changes requested."
+    }
+  },
+  "required": [
+    "updated"
+  ]
+}

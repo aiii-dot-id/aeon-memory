@@ -1,0 +1,6 @@
+dist/
+.keys/
+*.wasm
+*.aiiospkg
+/id.aeon.memory
+/oracle/

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "recent output",
+  "type": "object",
+  "properties": {
+    "notes": {
+      "type": "array",
+      "description": "Alive notes, most recently used first.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "content": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "project": {
+            "type": "string"
+          },
+          "created_ms": {
+            "type": "integer"
+          },
+          "updated_ms": {
+            "type": "integer",
+            "description": "Present once the note has been revised."
+          },
+          "evicted": {
+            "type": "boolean",
+            "description": "True when the note is soft-evicted: readable by id, absent from search, recent and recall."
+          }
+        }
+      }
+    },
+    "count": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "notes",
+    "count"
+  ]
+}

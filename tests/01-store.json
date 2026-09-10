@@ -1,0 +1,16 @@
+{
+  "name": "store keeps the first note as id 1",
+  "operation": "store",
+  "arguments": {
+    "content": "The ledger is the permanent record; this is the working set.",
+    "tags": [
+      "design",
+      "memory"
+    ],
+    "project": "memory"
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"id\":1"
+  }
+}

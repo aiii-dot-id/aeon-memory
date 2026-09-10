@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  native:
+    name: Native harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Format
+        run: |
+          drift=$(gofmt -l .)
+          if [ -n "$drift" ]; then
+            echo "gofmt drift in:" >&2
+            echo "$drift" >&2
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  module:
+    name: Guest module and worker oracle
+    runs-on: ubuntu-latest
+    env:
+      # The AII OS release whose worker and verifier the oracle runs on,
+      # pinned by hash.
+      AII_OS_VERSION: "0.1.2"
+      AII_OS_SHA256: "f2c01fc1c74e65777a2a04803bc149577781f78307be75fe077c841e9fa7356f"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: acifani/setup-tinygo@v2
+        with:
+          tinygo-version: "0.42.0"
+      - name: Build the guest module
+        run: go tool aiisdk build
+      - name: Package
+        run: go tool aiisdk package
+      - name: Fetch the AII OS release
+        run: |
+          curl -sSL -o aii-os.tar.gz "https://github.com/aiii-dot-id/aii-os/releases/download/v${AII_OS_VERSION}/aii-os_${AII_OS_VERSION}_linux_amd64.tar.gz"
+          echo "${AII_OS_SHA256}  aii-os.tar.gz" | sha256sum -c -
+          mkdir -p oracle && tar -xzf aii-os.tar.gz -C oracle
+      - name: Worker oracle
+        run: AII_OS_BIN="$PWD/oracle" go tool aiisdk test -grant kv -skip-build

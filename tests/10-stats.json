@@ -1,0 +1,9 @@
+{
+  "name": "stats counts one alive note",
+  "operation": "stats",
+  "arguments": {},
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"alive\":1"
+  }
+}

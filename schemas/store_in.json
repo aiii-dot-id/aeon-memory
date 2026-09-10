@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "store input",
+  "type": "object",
+  "properties": {
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The note to keep."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Tags for keyword search: non-empty strings without '|'."
+    },
+    "project": {
+      "type": "string",
+      "description": "Optional project scope."
+    }
+  },
+  "required": [
+    "content"
+  ],
+  "additionalProperties": false
+}

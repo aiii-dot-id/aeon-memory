@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "store output",
+  "type": "object",
+  "properties": {
+    "stored": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "integer",
+      "description": "The new note's id."
+    },
+    "created_ms": {
+      "type": "integer"
+    },
+    "displaced": {
+      "type": "object",
+      "description": "The note reclaimed to make room, when the store was at capacity.",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "evicted": {
+          "type": "boolean",
+          "description": "True when the displaced note was a soft-evicted note; false when it was the least recently used alive note."
+        }
+      }
+    },
+    "refused": {
+      "type": "boolean",
+      "description": "True when the key-value store declined the write."
+    },
+    "reasonCode": {
+      "type": "string",
+      "description": "The store's reason for a refused write."
+    },
+    "detail": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "stored"
+  ]
+}

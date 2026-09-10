@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "get output",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "integer"
+    },
+    "content": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "project": {
+      "type": "string"
+    },
+    "created_ms": {
+      "type": "integer"
+    },
+    "updated_ms": {
+      "type": "integer",
+      "description": "Present once the note has been revised."
+    },
+    "evicted": {
+      "type": "boolean",
+      "description": "True when the note is soft-evicted: readable by id, absent from search, recent and recall."
+    },
+    "found": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "found"
+  ]
+}

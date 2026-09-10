@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "stats output",
+  "type": "object",
+  "properties": {
+    "occupancy": {
+      "type": "integer",
+      "description": "Notes holding key slots: alive plus soft-evicted."
+    },
+    "alive": {
+      "type": "integer"
+    },
+    "evicted": {
+      "type": "integer",
+      "description": "Soft-evicted notes still holding slots."
+    },
+    "capacity": {
+      "type": "integer"
+    },
+    "remaining": {
+      "type": "integer"
+    },
+    "zombieq": {
+      "type": "integer",
+      "description": "Soft-evicted notes queued for reclaim."
+    },
+    "kv_scope": {
+      "type": "string",
+      "description": "The scope the key-value store reported for the last write: temp, persistent, or unknown before any write. temp means the memory is wiped at the next activation."
+    },
+    "projects": {
+      "type": "array",
+      "description": "Alive notes per project, count descending then name.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "occupancy",
+    "alive",
+    "evicted",
+    "capacity",
+    "remaining",
+    "kv_scope"
+  ]
+}
