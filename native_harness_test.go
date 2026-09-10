@@ -79,7 +79,7 @@ func respondNative(t *testing.T, host func([]byte) ([]byte, error), frame []byte
 					as[j] = string(rune(b))
 				} else {
 					as[j] = "."
-                }
+				}
 			}
 			t.Logf("%04x  %-48s  %s", i, strings.Join(hexs, " "), strings.Join(as, ""))
 		}

@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.6.0 (2026-09-13)
+
+- Host-routed durable acts (R101): `store` now delegates to the host's
+  memory instrument (`sdk.Memory.Remember`) and `search` to its recall
+  (`sdk.Memory.Recall`). Provenance is host-stamped, similarity and
+  meaning matches are host-decided, and the reply carries the
+  meaning-layer disclosure. The plugin's refusal-envelope contract
+  (B5) carries over: host refusals are mapped to structured envelopes
+  with named reason codes; faults stay on the error channel.
+- The migration walk: on the first durable act after upgrade, existing
+  KV notes are carried into the host record oldest-first — the record
+  reads as if the plugin had been writing all along — with per-act
+  readback verification, counters incremented only after readback
+  passes, and evicted-before-migration notes left in plugin KV
+  (skipped, never lost). Re-running the walk is idempotent by the
+  broker's reinforce rule: a re-walk reinforces what already landed.
+- `store` refuses `pinned`, `tags` and `project` with named reasons:
+  the host instrument takes only text, and silently accepting a no-op
+  would be a coverage lie. Pinned notes keep their pin in KV; the
+  working set keeps `evict` as the only way out.
+- Capacity reclaim is retired with its tests: no public verb writes
+  KV anymore (`store` is host-routed, `update` caps at the ceiling),
+  so occupancy is frozen below capacity and reclaim can never fire.
+  The dead code is deleted, not left to rot behind a contract the
+  runtime can no longer reach.
+- Matching semantics change: `search` under the host family is
+  all-words, any order, case-insensitive — the old KV engine's OR
+  semantics are gone with the engine.
+- `stats` reports the split: `host_created`, `host_reinforced`,
+  `host_updated` and `host_skipped` make the migration's outcome
+  visible, not hidden.
+- Schemas updated for the new store and search envelopes (string host
+  ids, `outcome`, refusal reasonCodes, migration block, meaning
+  disclosure, coverage fields) and the stats host counters.
+- Interface version 4. Capability envelope now declares `ring4.memory`
+  beside `ring4.kv`, in the envelope and all four variants.
+- The kit pin: development rides a local `replace` to the kit tree.
+  The memory instruments landed in 8ca7677, which is not yet
+  resolvable through the public module proxy. The replace drops and
+  the require advances to
+  v0.0.0-20260910211819-8ca7677f61e02efc the day that pseudo-version
+  resolves publicly, in one edit.
+
+
 ## 0.5.1 (2026-09-12)
 
 - Pinned notes (B5): `store` accepts `pinned` and a pinned note is

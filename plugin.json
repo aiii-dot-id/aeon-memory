@@ -1,14 +1,20 @@
 {
   "id": "id.aeon.memory",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "plugin_family": "tool_bridge",
   "publisher": "AIII",
   "title": "Aeon Working Memory",
-  "description": "A bounded working memory for an AII OS identity: store, search, recent, get, update, recall, evict, stats and health over the plugin key-value store. Reports coverage, displacement, eviction state and the store's own persistence verdict. Complements the ledger's permanent record.",
+  "description": "A bounded working memory for an AII OS identity over the plugin key-value store, with durable acts routed through the host memory record: store and search delegate to the host's remember and recall (host-stamped provenance, host-decided similarity and meaning), while recent, get, update, evict, stats and health stay plugin-local working-set acts. Reports coverage, eviction state, migration counts and the store's own persistence verdict. Complements the ledger's permanent record.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/aiii-dot-id/aeon-memory",
-  "interface": { "id": "id.aeon.memory.core", "version": 3 },
-  "capability_envelope": ["ring4.kv"],
+  "interface": {
+    "id": "id.aeon.memory.core",
+    "version": 4
+  },
+  "capability_envelope": [
+    "ring4.kv",
+    "ring4.memory"
+  ],
   "variants": [
     {
       "variant_id": "linux-x86_64-wasm",
@@ -17,7 +23,10 @@
       "topology": "full_identity_host",
       "execution_runtime": "wasm_component",
       "admission_profile": "wasm_sandbox",
-      "variant_capabilities": ["ring4.kv"]
+      "variant_capabilities": [
+        "ring4.kv",
+        "ring4.memory"
+      ]
     },
     {
       "variant_id": "linux-arm64-wasm",
@@ -26,7 +35,10 @@
       "topology": "full_identity_host",
       "execution_runtime": "wasm_component",
       "admission_profile": "wasm_sandbox",
-      "variant_capabilities": ["ring4.kv"]
+      "variant_capabilities": [
+        "ring4.kv",
+        "ring4.memory"
+      ]
     },
     {
       "variant_id": "macos-arm64-wasm",
@@ -35,7 +47,10 @@
       "topology": "full_identity_host",
       "execution_runtime": "wasm_component",
       "admission_profile": "wasm_sandbox",
-      "variant_capabilities": ["ring4.kv"]
+      "variant_capabilities": [
+        "ring4.kv",
+        "ring4.memory"
+      ]
     },
     {
       "variant_id": "windows-x86_64-wasm",
@@ -44,7 +59,10 @@
       "topology": "full_identity_host",
       "execution_runtime": "wasm_component",
       "admission_profile": "wasm_sandbox",
-      "variant_capabilities": ["ring4.kv"]
+      "variant_capabilities": [
+        "ring4.kv",
+        "ring4.memory"
+      ]
     }
   ]
 }

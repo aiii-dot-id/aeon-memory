@@ -3,73 +3,63 @@
   "title": "search output",
   "type": "object",
   "properties": {
+    "count": {
+      "type": "integer",
+      "description": "Hits shown after the limit."
+    },
+    "matched": {
+      "type": "integer",
+      "description": "Total hits before the limit."
+    },
+    "shown": {
+      "type": "integer",
+      "description": "Hits shown after the limit (equals count)."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "True when matched exceeded the limit."
+    },
+    "meaning": {
+      "type": "object",
+      "description": "The meaning layer's honest disclosure, passed through from the host: found_nothing names no basis."
+    },
     "results": {
       "type": "array",
-      "description": "Matching alive notes, best score first, newest first on ties.",
       "items": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "description": "The host memory id (m-prefixed)."
           },
-          "content": {
+          "text": {
             "type": "string"
           },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "project": {
+          "snippet": {
             "type": "string"
           },
-          "created_ms": {
-            "type": "integer"
+          "match": {
+            "type": "string",
+            "description": "exact_words, fuzzy, meaning, or id."
           },
-          "updated_ms": {
-            "type": "integer",
-            "description": "Present once the note has been revised."
-          },
-          "evicted": {
-            "type": "boolean",
-            "description": "True when the note is soft-evicted: readable by id, absent from search, recent and recall."
-          },
-          "pinned": {
-            "type": "boolean",
-            "description": "True when the note is exempt from capacity reclaim; eviction is its only exit."
+          "similarity": {
+            "type": "number"
           },
           "score": {
-            "type": "integer",
-            "description": "Terms found, counted once per field."
+            "type": "number"
+          },
+          "strength": {
+            "type": "number"
+          },
+          "time": {
+            "type": "string",
+            "description": "Host-stamped time, ms since epoch."
           }
         }
       }
-    },
-    "count": {
-      "type": "integer",
-      "description": "Notes returned."
-    },
-    "scanned": {
-      "type": "integer",
-      "description": "Alive notes examined: the whole store."
-    },
-    "matched": {
-      "type": "integer",
-      "description": "Notes that matched before the limit."
-    },
-    "limit": {
-      "type": "integer"
-    },
-    "truncated": {
-      "type": "boolean",
-      "description": "True when matched exceeds count."
     }
   },
   "required": [
-    "results",
-    "count",
-    "scanned",
-    "matched"
+    "count"
   ]
 }

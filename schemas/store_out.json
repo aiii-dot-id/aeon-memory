@@ -4,38 +4,49 @@
   "type": "object",
   "properties": {
     "stored": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "True when the host remembered the note."
     },
     "id": {
-      "type": "integer",
-      "description": "The new note's id."
+      "type": "string",
+      "description": "The host memory id (m-prefixed)."
     },
-    "created_ms": {
-      "type": "integer"
+    "outcome": {
+      "type": "string",
+      "description": "created, reinforced, or updated (supersession)."
     },
-    "displaced": {
-      "type": "object",
-      "description": "The note reclaimed to make room, when the store was at capacity.",
-      "properties": {
-        "id": {
-          "type": "integer"
-        },
-        "evicted": {
-          "type": "boolean",
-          "description": "True when the displaced note was a soft-evicted note; false when it was the least recently used alive note."
-        }
-      }
+    "created_at": {
+      "type": "string",
+      "description": "Host-stamped creation time, ms since epoch."
     },
     "refused": {
       "type": "boolean",
-      "description": "True when the key-value store declined the write."
+      "description": "True when the host declined the write."
     },
     "reasonCode": {
       "type": "string",
-      "description": "The store's reason for a refused write."
+      "description": "The host's reason for a declined write, or the plugin's for a refused argument (TAGS_NOT_SUPPORTED_ON_HOST_ROUTE, PROJECT_NOT_SUPPORTED_ON_HOST_ROUTE, PINNED_NOT_SUPPORTED_ON_HOST_ROUTE, CONTENT_REQUIRED)."
     },
     "detail": {
       "type": "string"
+    },
+    "migration": {
+      "type": "object",
+      "description": "Carried once on the first host-routed act after upgrade: the legacy KV set replayed into the host record, oldest first.",
+      "properties": {
+        "created": {
+          "type": "integer"
+        },
+        "reinforced": {
+          "type": "integer"
+        },
+        "updated": {
+          "type": "integer"
+        },
+        "skipped": {
+          "type": "integer"
+        }
+      }
     }
   },
   "required": [

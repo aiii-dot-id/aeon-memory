@@ -4,3 +4,4 @@ dist/
 *.aiiospkg
 /id.aeon.memory
 /oracle/
+aeon-memory

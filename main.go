@@ -65,14 +65,15 @@ import (
 )
 
 const (
-	pluginID     = "id.aeon.memory"
-	metaKey      = "meta"
-	noteKeyPfx   = "n/"
-	maxNotes     = 255 // the store's 256-key ceiling minus the meta key
-	defaultLimit = 10
-	maxLimit     = 50
-	tagSeparator = "|"
-	kvCapability = "ring4.kv"
+	pluginID         = "id.aeon.memory"
+	metaKey          = "meta"
+	noteKeyPfx       = "n/"
+	maxNotes         = 255 // the store's 256-key ceiling minus the meta key
+	defaultLimit     = 10
+	maxLimit         = 50
+	tagSeparator     = "|"
+	kvCapability     = "ring4.kv"
+	memoryCapability = "ring4.memory" // the host's memory instruments (R101 §6)
 )
 
 // ─── JSON encoding, by hand ────────────────────────────────────────
@@ -158,6 +159,17 @@ func encodeMeta(m *meta) string {
 		b.WriteString(`,"kv_scope":`)
 		b.WriteString(escapeJSONString(m.kvScope))
 	}
+	if m.migrated {
+		b.WriteString(`,"migrated":true`)
+		b.WriteString(`,"mig_created":`)
+		b.WriteString(strconv.FormatInt(m.migCreated, 10))
+		b.WriteString(`,"mig_reinforced":`)
+		b.WriteString(strconv.FormatInt(m.migReinforced, 10))
+		b.WriteString(`,"mig_updated":`)
+		b.WriteString(strconv.FormatInt(m.migUpdated, 10))
+		b.WriteString(`,"mig_skipped":`)
+		b.WriteString(strconv.FormatInt(m.migSkipped, 10))
+	}
 	b.WriteByte('}')
 	return b.String()
 }
@@ -193,6 +205,13 @@ type meta struct {
 	recent  []int64 // most recently used first
 	zombieq []int64 // soft-evicted, oldest eviction first
 	kvScope string  // "temp" | "persistent" | "" before the first put
+	// The 0.6.0 migration (VERB-MAPPING.md): once the legacy walk has
+	// carried the alive notes into the host record, done stays done.
+	migrated      bool
+	migCreated    int64 // remembered as new memories
+	migReinforced int64 // absorbed by an existing memory at ≥0.92 similarity
+	migUpdated    int64 // superseded a near-duplicate
+	migSkipped    int64 // evicted or missing: history, not carried
 }
 
 func loadMeta() (*meta, error) {
@@ -216,6 +235,21 @@ func loadMeta() (*meta, error) {
 	}
 	if s, ok := obj.String("kv_scope"); ok {
 		m.kvScope = s
+	}
+	if v, ok := obj.Bool("migrated"); ok && v {
+		m.migrated = true
+	}
+	if v, ok := obj.Int("mig_created"); ok {
+		m.migCreated = v
+	}
+	if v, ok := obj.Int("mig_reinforced"); ok {
+		m.migReinforced = v
+	}
+	if v, ok := obj.Int("mig_updated"); ok {
+		m.migUpdated = v
+	}
+	if mid, ok := obj.Int("mig_skipped"); ok {
+		m.migSkipped = mid
 	}
 	return m, nil
 }
@@ -312,6 +346,84 @@ func (m *meta) reclaim() reclaimResult {
 		return reclaimResult{note: n, ok: true}
 	}
 	return reclaimResult{none: true, pinned: pinned > 0}
+}
+
+// ─── The 0.6.0 migration walk ────────────────────────────────────
+
+// migrateIfDue carries the alive legacy notes into the host's memory
+// record, lazily, at the first host-routed act (store or search)
+// after the upgrade. VERB-MAPPING.md is the design of record. No
+// activation hook exists in the SDK, so laziness is the honest shape.
+//
+// Idempotence: the host's ≥0.92 reinforce rule makes a re-Remember of
+// an already-carried text reinforce the memory it found, so a walk
+// interrupted by a restart re-walks safely — no per-note mapping keys
+// needed (the KV ceiling is already full at 255 notes + meta).
+// Every landing is verified by Recall(ByID) before the walk counts
+// it; a verification failure aborts the walk with the refusal.
+// Evicted (zombieq) notes are history and are not carried: their
+// texts stay readable by get forever.
+func migrateIfDue() (map[string]any, error) {
+	m, err := loadMeta()
+	if err != nil {
+		return nil, err
+	}
+	if m.migrated {
+		return nil, nil // done in an earlier activation
+	}
+	created, reinforced, updated, skipped := int64(0), int64(0), int64(0), int64(0)
+	// Replay oldest first: m.recent is MRU-first, but the host record
+	// should read as if the plugin had been writing all along — the
+	// earliest note stored first. Reversing the index gives that order
+	// without a sort (ids are not guaranteed to follow recency).
+	replay := make([]int64, len(m.recent))
+	for i, id := range m.recent {
+		replay[len(m.recent)-1-i] = id
+	}
+	for _, id := range replay {
+		n, found, err := loadNote(id)
+		if err != nil {
+			return nil, err
+		}
+		if !found || n.evicted {
+			skipped++
+			continue
+		}
+		rem, err := sdk.Memory.Remember(n.content)
+		if err != nil {
+			return nil, err
+		}
+		// Verify the landing by reading it back from the host before
+		// counting it carried. ByID is the detail read; the SDK maps
+		// MEMORY_NOT_FOUND to found_nothing, which fails this check.
+		rr, err := sdk.Memory.Recall("", sdk.ByID(rem.ID))
+		if err != nil {
+			return nil, err
+		}
+		if rr.Status != "found" || len(rr.Hits) != 1 {
+			return nil, errors.New("migration walk: readback of " + rem.ID + " did not find the memory the host reported")
+		}
+		switch rem.Outcome {
+		case "created":
+			created++
+		case "reinforced":
+			reinforced++
+		default: // "updated": superseded a near-duplicate
+			updated++
+		}
+	}
+	m.migrated = true
+	m.migCreated, m.migReinforced, m.migUpdated, m.migSkipped = created, reinforced, updated, skipped
+	if err := saveMeta(m); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"migrated":   true,
+		"created":    created,
+		"reinforced": reinforced,
+		"updated":    updated,
+		"skipped":    skipped,
+	}, nil
 }
 
 // ─── Notes ────────────────────────────────────────────────────────
@@ -480,181 +592,177 @@ var (
 	errCapacityNone   = errors.New("working set at capacity: nothing reclaimable")
 )
 
-// writeRefusalReason reports a refusal the plugin itself decided, with
-// a reason code of its own naming, carrying whatever displacement
-// already happened on the way.
-func writeRefusalReason(err error, code string, detail string, displaced map[string]any) (any, error) {
-	out := map[string]any{
-		"stored":     false,
-		"refused":    true,
-		"reasonCode": code,
-		"detail":     detail,
-	}
-	if displaced != nil {
-		out["displaced"] = displaced
-	}
-	_ = err // the sentinel names the condition; the detail carries the words
-	return out, nil
-}
-
 // ─── Registration ─────────────────────────────────────────────────
+
+// hostRefusal maps a host-side refusal (Denied or OperationError) to
+// the plugin's structured refusal envelope, B5-style: refusals are
+// structured data the caller can branch on, faults stay on the error
+// channel. ok=false means: not a refusal, propagate the error.
+func hostRefusal(err error) (map[string]any, bool) {
+	var d *sdk.Denied
+	if errors.As(err, &d) {
+		return map[string]any{
+			"stored":     false,
+			"refused":    true,
+			"reasonCode": d.ReasonCode,
+			"detail":     d.Message,
+		}, true
+	}
+	var oe *sdk.OperationError
+	if errors.As(err, &oe) {
+		return map[string]any{
+			"stored":     false,
+			"refused":    true,
+			"reasonCode": oe.ReasonCode,
+			"detail":     oe.Reason,
+		}, true
+	}
+	return nil, false
+}
 
 func init() { newMemoryPlugin().Run() }
 
 func newMemoryPlugin() *sdk.Plugin {
 	p := sdk.New(pluginID)
 
+	// 0.6.0: host-routed store (VERB-MAPPING.md). The durable act goes
+	// to the host's record via sdk.Memory.Remember; KV reservation,
+	// reclaim-at-capacity and displaced are gone with it. Pinned is
+	// refused with a named reason: the host has no pin concept, and a
+	// silent no-op would hide that the semantics changed.
 	p.Describe("store", sdk.Descriptor{
-		Summary:      "Keep a working note: content, optional tags, project and pinned. At capacity one slot is reclaimed first and the displaced note is reported; pinned notes are never displaced, and a full pinned set or a refused reclaim is reported as a refusal.",
+		Summary:      "Remember a note in the host's memory record (0.6.0: host-routed). Content through to memory.remember; the reply reports the host's verdict (created, reinforced or updated, and the id). Pinned is refused: the host record has no pin concept. The legacy KV working set is no longer written by store.",
 		Input:        "schemas/store_in.json",
 		Output:       "schemas/store_out.json",
 		Effects:      sdk.EffectsWriteLocal,
-		Capabilities: []string{kvCapability},
+		Capabilities: []string{memoryCapability},
 	})
 	p.Handle("store", func(c sdk.Call) (any, error) {
 		content, ok := c.Args().String("content")
 		if !ok || content == "" {
 			return nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "store requires arguments.content (non-empty string)")
 		}
-		tags, _, err := tagsArgument(c)
-		if err != nil {
-			return nil, err
+		if pinned, _ := c.Args().Bool("pinned"); pinned {
+			return nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "pinned is refused on host-routed store: the host's memory record has no pin concept; pin protection survives only on the legacy KV set (see VERB-MAPPING.md)")
 		}
-		pinned, _ := c.Args().Bool("pinned")
-		project, _ := c.Args().String("project")
-		nowMs, err := hostClock(c)
+		// 0.6.0: tags too are refused, by the same ruling as pinned —
+		// Remember takes only text, so accepting tags would silently
+		// drop them (VERB-MAPPING.md: no silent no-ops on the facade).
+		if c.Args().Has("tags") {
+			return nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "tags is refused on host-routed store: the host's memory record has no tag concept; tags survive on the legacy KV set through update (see VERB-MAPPING.md)")
+		}
+		// project: same ruling, third instance of the same no-op risk.
+		if c.Args().Has("project") {
+			return nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "project is refused on host-routed store: the host's memory record has no project concept; project scoping survives on the legacy KV set through update (see VERB-MAPPING.md)")
+		}
+		supersedes, _ := c.Args().String("supersedes")
+
+		// The first host-routed act after upgrade carries the legacy
+		// notes into the host record (VERB-MAPPING.md, migration): a
+		// lazy walk, readback-verified per landing.
+		mig, err := migrateIfDue()
 		if err != nil {
 			return nil, err
 		}
 
-		m, err := loadMeta()
-		if err != nil {
-			return nil, err
+		opts := []sdk.RememberOption{}
+		if supersedes != "" {
+			opts = append(opts, sdk.Supersedes(supersedes))
 		}
-		var displaced map[string]any
-		if len(m.recent) >= maxNotes {
-			r := m.reclaim()
-			switch {
-			case r.ok:
-				displaced = map[string]any{"id": r.note.id, "evicted": r.note.evicted}
-			case r.none && r.pinned:
-				return writeRefusalReason(errCapacityPinned, "WORKING_SET_AT_CAPACITY_PINNED",
-					"every alive note is pinned; explicit evict is the only way to make room", displaced)
-			case r.none:
-				return writeRefusalReason(errCapacityNone, "WORKING_SET_AT_CAPACITY_NONE",
-					"the working set is at capacity but holds nothing reclaimable", displaced)
-			default:
-				return writeRefusalReason(r.refused, "WORKING_SET_RECLAIM_REFUSED",
-					"the key-value store refused a read or delete during reclaim: "+r.refused.Error(), displaced)
+		rem, err := sdk.Memory.Remember(content, opts...)
+		if err != nil {
+			if rf, ok := hostRefusal(err); ok {
+				return rf, nil
 			}
+			return nil, err
 		}
-
-		// Meta first: the index entry is the reservation, the note key
-		// the fulfilment. A crash between the two leaves a stale index
-		// entry that every reader skips and health drops.
-		id := m.nextID
-		m.nextID++
-		m.recent = append([]int64{id}, m.recent...)
-		if err := saveMeta(m); err != nil {
-			return writeRefusal(err, displaced)
+		out := map[string]any{
+			"stored":  true,
+			"id":      rem.ID,
+			"outcome": rem.Outcome,
 		}
-
-		n := &note{id: id, content: content, tags: tags, project: project, createdMs: nowMs, pinned: pinned}
-		if err := saveNote(n); err != nil {
-			// The note never landed: return the reservation.
-			m.removeFromRecent(id)
-			m.nextID--
-			_ = saveMeta(m)
-			return writeRefusal(err, displaced)
+		if rem.Of != "" {
+			out["of"] = rem.Of
 		}
-
-		out := map[string]any{"stored": true, "id": id, "created_ms": nowMs}
-		if displaced != nil {
-			out["displaced"] = displaced
+		if rem.CreatedAt != "" {
+			out["created_at"] = rem.CreatedAt
+		}
+		if rem.Scope != "" {
+			out["scope"] = rem.Scope
+		}
+		if mig != nil {
+			out["migration"] = mig
 		}
 		return out, nil
 	})
-
+	// 0.6.0: host-routed search (VERB-MAPPING.md). Retrieval goes to
+	// the host's record via sdk.Memory.Recall: fuzzy and meaning
+	// matches, ranked and decayed, reinforcement host-side. The KV
+	// recency touch is gone — reinforcement replaces use-as-recency
+	// for the host record. Legacy KV retrieval stays local: recent,
+	// get, update, recall-window, evict.
 	p.Describe("search", sdk.Descriptor{
-		Summary:      "Keyword search across every alive note, best score first; reports how many notes were scanned and matched. Returned notes move to the front of the recency order.",
+		Summary:      "Recall from the host's memory record (0.6.0: host-routed). Query through to memory.recall, exact or ranked-fuzzy; hits carry match mode, similarity, score, strength and the meaning-layer disclosure. A recall reinforces what it returns. Keyword search over the legacy KV set remains available through recent + get.",
 		Input:        "schemas/search_in.json",
 		Output:       "schemas/search_out.json",
-		Effects:      sdk.EffectsWriteLocal,
-		Capabilities: []string{kvCapability},
+		Effects:      sdk.EffectsReadInternal,
+		Capabilities: []string{memoryCapability},
 	})
 	p.Handle("search", func(c sdk.Call) (any, error) {
 		query, ok := c.Args().String("query")
 		if !ok || query == "" {
 			return nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "search requires arguments.query (non-empty string)")
 		}
-		project, _ := c.Args().String("project")
-		limit := limitArgument(c)
-
-		m, err := loadMeta()
+		// The first host-routed act after upgrade carries the legacy
+		// notes in, so the new search can find them.
+		mig, err := migrateIfDue()
 		if err != nil {
 			return nil, err
 		}
-		terms := strings.Fields(query)
-
-		type hit struct {
-			note  *note
-			score int
+		limit := limitArgument(c)
+		exact, _ := c.Args().Bool("exact")
+		opts := []sdk.RecallOption{sdk.Limit(int(limit))}
+		if exact {
+			opts = append(opts, sdk.Exact())
 		}
-		var hits []hit
-		scanned := 0
-		for _, id := range m.recent {
-			n, found, err := loadNote(id)
-			if err != nil {
-				return nil, err
-			}
-			if !found || n.evicted {
-				continue
-			}
-			scanned++
-			if project != "" && n.project != project {
-				continue
-			}
-			if score := matchNote(n, terms); score > 0 {
-				hits = append(hits, hit{note: n, score: score})
-			}
+		rr, err := sdk.Memory.Recall(query, opts...)
+		if err != nil {
+			return nil, err
 		}
-		sort.SliceStable(hits, func(i, j int) bool {
-			if hits[i].score != hits[j].score {
-				return hits[i].score > hits[j].score
-			}
-			return hits[i].note.createdMs > hits[j].note.createdMs
-		})
-		matched := len(hits)
-		if int64(len(hits)) > limit {
-			hits = hits[:limit]
+		hits := make([]any, 0, len(rr.Hits))
+		for _, h := range rr.Hits {
+			hits = append(hits, map[string]any{
+				"id":         h.ID,
+				"snippet":    h.Snippet,
+				"match":      h.Match,
+				"similarity": h.Similarity,
+				"score":      h.Score,
+				"strength":   h.Strength,
+				"time":       h.Time,
+				"accesses":   h.Accesses,
+			})
 		}
-
-		results := make([]any, 0, len(hits))
-		for _, h := range hits {
-			r := noteToMap(h.note)
-			r["score"] = h.score
-			results = append(results, r)
+		out := map[string]any{
+			"results":   hits,
+			"count":     len(hits),
+			"matched":   rr.Matched,
+			"shown":     rr.Shown,
+			"truncated": rr.Truncated,
+			"status":    rr.Status,
+			"policy":    rr.Policy,
 		}
-		// Retrieval is use: touched last-to-first so the best hit ends
-		// up frontmost.
-		for i := len(hits) - 1; i >= 0; i-- {
-			m.touch(hits[i].note.id)
-		}
-		if len(hits) > 0 {
-			if err := saveMeta(m); err != nil {
-				return nil, err
+		if rr.Meaning != "" {
+			out["meaning"] = map[string]any{
+				"status": rr.Meaning,
+				"detail": rr.MeaningDetail,
+				"basis":  rr.MeaningBasis,
 			}
 		}
-		return map[string]any{
-			"results":   results,
-			"count":     len(results),
-			"scanned":   scanned,
-			"matched":   matched,
-			"limit":     limit,
-			"truncated": int64(matched) > limit,
-		}, nil
+		if mig != nil {
+			out["migration"] = mig
+		}
+		return out, nil
 	})
-
 	p.Describe("recent", sdk.Descriptor{
 		Summary:      "The most recently used alive notes, most recent first; mode=oldest returns them oldest-first from the tail of the same recency order. A pure read in both modes: it never reorders.",
 		Input:        "schemas/recent_in.json",
@@ -938,16 +1046,22 @@ func newMemoryPlugin() *sdk.Plugin {
 		if remaining < 0 {
 			remaining = 0
 		}
+		// 0.6.0: host-record counters — the split between the legacy KV
+		// set and the host record is visible in stats, not hidden.
 		return map[string]any{
-			"occupancy": occupancy,
-			"alive":     alive,
-			"pinned":    pinned,
-			"evicted":   zombies,
-			"capacity":  maxNotes,
-			"remaining": remaining,
-			"zombieq":   len(m.zombieq),
-			"kv_scope":  scopeReport(m.kvScope),
-			"projects":  projects,
+			"occupancy":       occupancy,
+			"alive":           alive,
+			"pinned":          pinned,
+			"evicted":         zombies,
+			"capacity":        maxNotes,
+			"remaining":       remaining,
+			"zombieq":         len(m.zombieq),
+			"kv_scope":        scopeReport(m.kvScope),
+			"projects":        projects,
+			"host_created":    m.migCreated,
+			"host_reinforced": m.migReinforced,
+			"host_updated":    m.migUpdated,
+			"host_skipped":    m.migSkipped,
 		}, nil
 	})
 

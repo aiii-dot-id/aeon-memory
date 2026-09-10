@@ -32,6 +32,22 @@
       "type": "string",
       "description": "The scope the key-value store reported for the last write: temp, persistent, or unknown before any write. temp means the memory is wiped at the next activation."
     },
+    "host_created": {
+      "type": "integer",
+      "description": "Notes the migration walk carried into the host record as new memories."
+    },
+    "host_reinforced": {
+      "type": "integer",
+      "description": "Notes the walk found already present in the host record (similarity at or above the reinforce threshold) and reinforced instead of duplicating."
+    },
+    "host_updated": {
+      "type": "integer",
+      "description": "Near-duplicates the walk consolidated into the existing host memory via supersession."
+    },
+    "host_skipped": {
+      "type": "integer",
+      "description": "Notes the walk left in plugin KV only: soft-evicted before migration, or the host refused the remember."
+    },
     "projects": {
       "type": "array",
       "description": "Alive notes per project, count descending then name.",

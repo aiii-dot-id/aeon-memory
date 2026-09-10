@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -32,6 +33,20 @@ type fakeKV struct {
 	failDeleteKey  string          // when set, every kv.delete of this key fails until cleared
 	maxKeys        int             // 0 = unlimited; otherwise a put of a NEW key beyond it is refused
 	scope          string          // reported on every put; default "persistent"
+
+	// memory.* (0.6.0): the host's memory instruments, faked at broker shape
+	failNextRemember *map[string]any // the next memory.remember answers this instead of creating
+	failNextRecall   *map[string]any // the next memory.recall answers this instead of searching
+	mClock           int             // mint counter for deterministic ids: m0, m1, ...
+	memories         []fakeMemory
+}
+
+// fakeMemory is one host-side record as the fake broker holds it.
+type fakeMemory struct {
+	ID       string
+	Text     string
+	Time     int64
+	Accesses int
 }
 
 func newFakeKV() *fakeKV {
@@ -103,8 +118,161 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 			"status":           "succeeded",
 			"operation_result": map[string]any{"deleted": found},
 		})
+
+	// ─── memory.* (0.6.0: the host's memory instruments, broker shapes)
+	case "memory.remember":
+		text, _ := obj.Object("arguments").String("text")
+		if f.failNextRemember != nil {
+			fail := *f.failNextRemember
+			f.failNextRemember = nil
+			return json.Marshal(fail)
+		}
+		// Broker rule: supersedes mints a NEW id, keeps the old memory
+		// for audit, answers outcome=updated naming the predecessor.
+		sup, _ := obj.Object("arguments").String("supersedes")
+		if sup != "" {
+			known := false
+			for _, mm := range f.memories {
+				if mm.ID == sup {
+					known = true
+				}
+			}
+			if !known {
+				return json.Marshal(map[string]any{
+					"status":     "failed",
+					"reason":     "superseded id is unknown to the host",
+					"reasonCode": "MEMORY_TARGET_INVALID",
+				})
+			}
+			id := "m" + strconv.Itoa(f.mClock)
+			f.mClock++
+			f.memories = append(f.memories, fakeMemory{ID: id, Text: text, Time: f.clock})
+			return json.Marshal(map[string]any{
+				"status": "succeeded",
+				"operation_result": map[string]any{
+					"id":         id,
+					"outcome":    "updated",
+					"of":         sup,
+					"created_at": strconv.FormatInt(f.clock, 10),
+					"scope":      "persistent",
+				},
+			})
+		}
+		// Broker rule: a remember at ≥0.92 similarity to an existing memory
+		// reinforces it. The fake models the threshold as exact-text match —
+		// the only honest simplification without embeddings.
+		for i := range f.memories {
+			if f.memories[i].Text == text {
+				f.memories[i].Accesses++
+				return json.Marshal(map[string]any{
+					"status": "succeeded",
+					"operation_result": map[string]any{
+						"id":         f.memories[i].ID,
+						"outcome":    "reinforced",
+						"created_at": strconv.FormatInt(f.memories[i].Time, 10),
+						"scope":      "persistent",
+					},
+				})
+			}
+		}
+		id := "m" + strconv.Itoa(f.mClock)
+		f.mClock++
+		f.memories = append(f.memories, fakeMemory{ID: id, Text: text, Time: f.clock})
+		return json.Marshal(map[string]any{
+			"status": "succeeded",
+			"operation_result": map[string]any{
+				"id":         id,
+				"outcome":    "created",
+				"created_at": strconv.FormatInt(f.clock, 10),
+				"scope":      "persistent",
+			},
+		})
+
+	case "memory.recall":
+		if f.failNextRecall != nil {
+			fail := *f.failNextRecall
+			f.failNextRecall = nil
+			return json.Marshal(fail)
+		}
+		query, _ := obj.Object("arguments").String("query")
+		idArg, _ := obj.Object("arguments").String("id")
+		if idArg != "" {
+			for _, mm := range f.memories {
+				if mm.ID == idArg {
+					return json.Marshal(map[string]any{
+						"status": "succeeded",
+						"operation_result": map[string]any{
+							"status":  "found",
+							"matched": 1,
+							"shown":   1,
+							"policy":  "carrd",
+							"hits": []any{map[string]any{
+								"id": mm.ID, "text": mm.Text, "snippet": mm.Text,
+								"match": "id", "score": 1.0, "strength": 1.0,
+								"time": strconv.FormatInt(mm.Time, 10),
+							}},
+						},
+					})
+				}
+			}
+			return json.Marshal(map[string]any{
+				"status":     "failed",
+				"reason":     "memory id not found",
+				"reasonCode": "MEMORY_NOT_FOUND",
+			})
+		}
+		if query == "" {
+			return json.Marshal(map[string]any{
+				"status":     "failed",
+				"reason":     "memory.recall requires arguments.query or arguments.id",
+				"reasonCode": "OPERATION_ARGUMENT_INVALID",
+			})
+		}
+		hits := make([]any, 0, 8)
+		matched := 0
+		for _, mm := range f.memories {
+			all := true
+			// broker-family matching: every word must appear, any order,
+			// case-insensitive (the aii-os recall contract)
+			for _, w := range strings.Fields(query) {
+				if !strings.Contains(strings.ToLower(mm.Text), strings.ToLower(w)) {
+					all = false
+				}
+			}
+			if !all {
+				continue
+			}
+			matched++
+			hits = append(hits, map[string]any{
+				"id": mm.ID, "text": mm.Text, "snippet": mm.Text,
+				"match": "exact_words", "score": 1.0, "strength": 1.0,
+				"time": strconv.FormatInt(mm.Time, 10),
+			})
+		}
+		limit := 7
+		if v, ok := obj.Object("arguments").Int("limit"); ok && v > 0 {
+			limit = int(v)
+		}
+		shown := len(hits)
+		truncated := shown > limit
+		if truncated {
+			hits = hits[:limit]
+			shown = limit
+		}
+		return json.Marshal(map[string]any{
+			"status": "succeeded",
+			"operation_result": map[string]any{
+				"status":    "found",
+				"matched":   matched,
+				"shown":     shown,
+				"policy":    "carrd",
+				"truncated": truncated,
+				"meaning":   map[string]any{"status": "found_nothing", "detail": "the fake harness names no embeddings model", "basis": "none"},
+				"hits":      hits,
+			},
+		})
 	}
-	return nil, fmt.Errorf("unknown operation: %s", op)
+	return nil, fmt.Errorf("fake host: unknown operation: %s", op)
 }
 
 // ─── Harness ──────────────────────────────────────────────────────
@@ -178,9 +346,11 @@ func refused(t *testing.T, fkv *fakeKV, operation string, args map[string]any) {
 
 func fill(t *testing.T, fkv *fakeKV, n int, prefix string) {
 	t.Helper()
-	for i := 0; i < n; i++ {
-		invoke(t, fkv, "store", map[string]any{"content": fmt.Sprintf("%s %d", prefix, i)})
-		fkv.clock++
+	// 0.6.0: store is host-routed, so seeding goes direct to KV —
+	// this stands in for a pre-0.6.0 history, exactly what these
+	// working-set tests exercise.
+	for i := 1; i <= n; i++ {
+		seedNote(t, fkv, int64(i), fmt.Sprintf("%s %d", prefix, i-1))
 	}
 }
 
@@ -193,37 +363,325 @@ func editMeta(t *testing.T, fkv *fakeKV, old, new string) {
 	fkv.store["meta"] = strings.Replace(raw, old, new, 1)
 }
 
+// editNote patches a note body in place, the note-side twin of editMeta.
+func editNote(t *testing.T, fkv *fakeKV, id int64, old, new string) {
+	t.Helper()
+	key := noteKeyPfx + strconv.FormatInt(id, 10)
+	raw, ok := fkv.store[key]
+	if !ok || !strings.Contains(raw, old) {
+		t.Fatalf("note %d does not contain %q: %s", id, old, raw)
+	}
+	fkv.store[key] = strings.Replace(raw, old, new, 1)
+}
+
+// ─── 0.6.0: host-routed store and search ─────────────────────────
+
+// seedNote writes one legacy KV note exactly as the plugin's own
+// pre-0.6.0 writer did: note key, index head, meta. Tests use it to
+// stand in for a 0.5.x history the migration walk then carries.
+func seedNote(t *testing.T, fkv *fakeKV, id int64, content string) {
+	t.Helper()
+	tags := ""
+	noteJSON := `{"id":` + strconv.FormatInt(id, 10) +
+		`,"content":` + mustJSON(t, content) +
+		`,"tags":` + mustJSON(t, tags) +
+		`,"project":"","created_ms":` + strconv.FormatInt(fkv.clock, 10) +
+		`,"updated_ms":0,"evicted":false,"pinned":false}`
+	fkv.store[noteKeyPfx+strconv.FormatInt(id, 10)] = noteJSON
+
+	raw, ok := fkv.store["meta"]
+	var m map[string]any
+	if ok {
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			t.Fatalf("seed: meta is not JSON: %s", raw)
+		}
+	} else {
+		m = map[string]any{}
+	}
+	recent, _ := m["recent"].(string)
+	parts := []string{}
+	for _, p := range strings.Fields(recent) {
+		parts = append(parts, p)
+	}
+	// Faithful to the 0.5.x writer: a stored note enters at the FRONT
+	// of the recency order (most recently used first).
+	parts = append([]string{strconv.FormatInt(id, 10)}, parts...)
+	m["recent"] = strings.Join(parts, " ")
+	if _, ok := m["zombieq"]; !ok {
+		m["zombieq"] = ""
+	}
+	if _, ok := m["next_id"]; !ok {
+		m["next_id"] = 1
+	}
+	if id >= toInt(m["next_id"]) {
+		m["next_id"] = id + 1
+	}
+	fkv.store["meta"] = mustJSON(t, m)
+	fkv.clock++
+}
+
+// seedNoteFull writes one legacy KV note with tags and project —
+// the shape the pre-0.6.0 writer produced for tagged/projected
+// notes. seedNote establishes the record (note key, index head,
+// next_id, clock); this overwrites the note body with the full
+// field set so the working-set verbs see tags/project as stored.
+func seedNoteFull(t *testing.T, fkv *fakeKV, id int64, content string, tags []string, project string) {
+	t.Helper()
+	seedNote(t, fkv, id, content)
+	tagStr := strings.Join(tags, " ")
+	noteJSON := `{"id":` + strconv.FormatInt(id, 10) +
+		`,"content":` + mustJSON(t, content) +
+		`,"tags":` + mustJSON(t, tagStr) +
+		`,"project":` + mustJSON(t, project) +
+		`,"created_ms":` + strconv.FormatInt(fkv.clock-1, 10) +
+		`,"updated_ms":0,"evicted":false,"pinned":false}`
+	fkv.store[noteKeyPfx+strconv.FormatInt(id, 10)] = noteJSON
+}
+
+func toInt(v any) int64 {
+	f, _ := v.(float64)
+	return int64(f)
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestStoreIsHostRouted(t *testing.T) {
+	fkv := newFakeKV()
+	r := invoke(t, fkv, "store", map[string]any{"content": "first host-routed note"})
+	if r["stored"] != true {
+		t.Fatalf("stored = %v", r)
+	}
+	id, _ := r["id"].(string)
+	if id == "" {
+		t.Fatalf("host id missing: %v", r)
+	}
+	if r["outcome"] != "created" {
+		t.Fatalf("outcome = %v, want created", r["outcome"])
+	}
+	if len(fkv.memories) != 1 {
+		t.Fatalf("the host record holds %d memories, want 1", len(fkv.memories))
+	}
+	if len(fkv.store) != 1 { // meta only — no KV note written
+		t.Fatalf("store wrote KV keys: %v", fkv.store)
+	}
+	// A second store of identical text reinforces rather than creates.
+	r2 := invoke(t, fkv, "store", map[string]any{"content": "first host-routed note"})
+	if r2["outcome"] != "reinforced" {
+		t.Fatalf("second identical store outcome = %v, want reinforced", r2["outcome"])
+	}
+	if len(fkv.memories) != 1 {
+		t.Fatalf("reinforce minted a second memory: %d", len(fkv.memories))
+	}
+}
+
+func TestStoreRefusesPinned(t *testing.T) {
+	fkv := newFakeKV()
+	res := call(t, fkv, "store", map[string]any{"content": "pinned attempt", "pinned": true})
+	if res["status"] != "failed" {
+		t.Fatalf("pinned store should fail, got %v", res)
+	}
+	rc, _ := res["reasonCode"].(string)
+	if !strings.Contains(rc, "ARGUMENT") {
+		t.Fatalf("refusal code = %q, want an argument code", rc)
+	}
+	reason, _ := res["reason"].(string)
+	if !strings.Contains(reason, "pin") {
+		t.Fatalf("refusal reason should name the pin semantics: %v", res["reason"])
+	}
+	_, has := res["operation_result"]
+	if has {
+		t.Fatalf("argument refusal must not carry an operation_result: %v", res)
+	}
+}
+
+func TestStoreMapsHostRefusals(t *testing.T) {
+	fkv := newFakeKV()
+	fail := map[string]any{
+		"status":     "failed",
+		"reason":     "memory quota exhausted",
+		"reasonCode": "MEMORY_QUOTA_EXCEEDED",
+	}
+	fkv.failNextRemember = &fail
+	res := call(t, fkv, "store", map[string]any{"content": "quota probe"})
+	if res["status"] != "succeeded" {
+		t.Fatalf("a host refusal is a structured envelope, not a failed frame: %v", res)
+	}
+	or, _ := res["operation_result"].(map[string]any)
+	if or["refused"] != true {
+		t.Fatalf("refused = %v", or)
+	}
+	if or["reasonCode"] != "MEMORY_QUOTA_EXCEEDED" {
+		t.Fatalf("reasonCode = %v", or["reasonCode"])
+	}
+	detail, _ := or["detail"].(string)
+	if !strings.Contains(detail, "quota") {
+		t.Fatalf("detail = %v", or["detail"])
+	}
+}
+
+func TestStoreSupersedes(t *testing.T) {
+	fkv := newFakeKV()
+	r1 := invoke(t, fkv, "store", map[string]any{"content": "original claim"})
+	id1, _ := r1["id"].(string)
+	if id1 == "" {
+		t.Fatalf("no host id: %v", r1)
+	}
+	// Correct it through the facade's supersedes passthrough.
+	r2 := invoke(t, fkv, "store", map[string]any{
+		"content":    "corrected claim",
+		"supersedes": id1,
+	})
+	if r2["outcome"] != "updated" {
+		t.Fatalf("outcome = %v, want updated", r2["outcome"])
+	}
+	if r2["of"] != id1 {
+		t.Fatalf("of = %v, want %s", r2["of"], id1)
+	}
+	if len(fkv.memories) != 2 {
+		t.Fatalf("memories = %d, want 2 (old kept for audit)", len(fkv.memories))
+	}
+}
+
+func TestSearchIsHostRouted(t *testing.T) {
+	fkv := newFakeKV()
+	seedNote(t, fkv, 1, "alpha note about gardens")
+	fkv.clock += 1000
+	seedNote(t, fkv, 2, "beta note about rivers")
+	res := invoke(t, fkv, "search", map[string]any{"query": "gardens"})
+	if res["status"] != "found" {
+		t.Fatalf("status = %v", res["status"])
+	}
+	results := res["results"].([]any)
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	hit := results[0].(map[string]any)
+	if hit["id"] != "m0" {
+		t.Fatalf("hit id = %v, want m0 (the migration walk Remembers note 1 first)", hit["id"])
+	}
+	// The migration walk ran: both seeded notes were Remembered.
+	if len(fkv.memories) != 2 {
+		t.Fatalf("memories = %d, want 2 after migration", len(fkv.memories))
+	}
+	mig, _ := res["migration"].(map[string]any)
+	if mig["migrated"] != true || mig["created"] != float64(2) {
+		t.Fatalf("migration report = %v", mig)
+	}
+	// Second search: no migration block (done is done), and the
+	// coverage fields are the host's own.
+	res2 := invoke(t, fkv, "search", map[string]any{"query": "rivers"})
+	if _, has := res2["migration"]; has {
+		t.Fatalf("second search carried a migration block: %v", res2)
+	}
+	if res2["matched"] != float64(1) || res2["shown"] != float64(1) {
+		t.Fatalf("coverage = matched %v shown %v", res2["matched"], res2["shown"])
+	}
+	if res2["policy"] != "carrd" {
+		t.Fatalf("policy = %v", res2["policy"])
+	}
+}
+
+func TestSearchCarriesMeaningDisclosure(t *testing.T) {
+	fkv := newFakeKV()
+	seedNote(t, fkv, 1, "a note about spiral gardens")
+	res := invoke(t, fkv, "search", map[string]any{"query": "spiral"})
+	meaning, _ := res["meaning"].(map[string]any)
+	if meaning == nil {
+		t.Fatalf("meaning disclosure missing: %v", res)
+	}
+	if meaning["status"] != "found_nothing" {
+		t.Fatalf("meaning status = %v (the fake host names no model)", meaning["status"])
+	}
+	if meaning["basis"] != "none" {
+		t.Fatalf("meaning basis = %v", meaning["basis"])
+	}
+}
+
+func TestMigrationWalkCarriesAndReports(t *testing.T) {
+	fkv := newFakeKV()
+	seedNote(t, fkv, 1, "legacy note one")
+	fkv.clock += 1000
+	seedNote(t, fkv, 2, "legacy note two")
+	fkv.clock += 1000
+	seedNote(t, fkv, 3, "legacy note three")
+	res := invoke(t, fkv, "store", map[string]any{"content": "a fresh host-routed note"})
+	mig, _ := res["migration"].(map[string]any)
+	if mig == nil {
+		t.Fatalf("the first host-routed act carried no migration block: %v", res)
+	}
+	if mig["created"] != float64(3) {
+		t.Fatalf("created = %v, want 3", mig["created"])
+	}
+	if mig["skipped"] != float64(0) {
+		t.Fatalf("skipped = %v", mig["skipped"])
+	}
+	if len(fkv.memories) != 4 { // 3 legacy + 1 fresh
+		t.Fatalf("memories = %d, want 4", len(fkv.memories))
+	}
+	// Done is done: a second act carries no block.
+	res2 := invoke(t, fkv, "store", map[string]any{"content": "a second fresh note"})
+	if _, has := res2["migration"]; has {
+		t.Fatalf("second act carried a migration block: %v", res2)
+	}
+	if len(fkv.memories) != 5 {
+		t.Fatalf("memories = %d, want 5", len(fkv.memories))
+	}
+}
+
+func TestStatsReportsHostCounters(t *testing.T) {
+	fkv := newFakeKV()
+	seedNote(t, fkv, 1, "legacy note one")
+	seedNote(t, fkv, 2, "legacy note two")
+	// Before the walk: the split is visible — KV holds two, host zero.
+	if s := invoke(t, fkv, "stats", map[string]any{}); s["host_created"] != float64(0) {
+		t.Fatalf("host_created before the walk = %v, want 0", s["host_created"])
+	}
+	// The first host-routed act runs the walk.
+	invoke(t, fkv, "store", map[string]any{"content": "a fresh host-routed note"})
+	// After: the counters survive the store that triggered them.
+	s2 := invoke(t, fkv, "stats", map[string]any{})
+	if s2["host_created"] != float64(2) {
+		t.Fatalf("host_created = %v, want 2", s2["host_created"])
+	}
+	if s2["host_reinforced"] != float64(0) || s2["host_updated"] != float64(0) || s2["host_skipped"] != float64(0) {
+		t.Fatalf("host counters after the walk = %v", s2)
+	}
+}
+
+func TestMigrationAbortsWhenReadbackFails(t *testing.T) {
+	fkv := newFakeKV()
+	seedNote(t, fkv, 1, "a legacy note whose landing cannot be read back")
+	// The fake recall refuses by-id reads: the walk's verification
+	// step cannot confirm the landing and must abort the walk.
+	fail := map[string]any{
+		"status":     "failed",
+		"reason":     "injected recall failure",
+		"reasonCode": "MEMORY_READ_REFUSED",
+	}
+	fkv.failNextRecall = &fail
+	res := call(t, fkv, "store", map[string]any{"content": "probe"})
+	if res["status"] != "failed" {
+		t.Fatalf("a readback failure must fault the call, not pass: %v", res)
+	}
+	if len(fkv.memories) != 1 {
+		t.Fatalf("memories = %d, want 1 (the walk aborted after the landing)", len(fkv.memories))
+	}
+}
+
 // ─── Store, search, recent ────────────────────────────────────────
 
 func TestStoreAndRecent(t *testing.T) {
 	fkv := newFakeKV()
-	r1 := invoke(t, fkv, "store", map[string]any{
-		"content": "Reading the plugin framework design docs",
-		"tags":    []string{"plugin", "design"},
-		"project": "memory-plugin",
-	})
-	fkv.clock += 1000
-	invoke(t, fkv, "store", map[string]any{
-		"content": "Writing the working memory plugin code",
-		"tags":    []string{"plugin", "code"},
-		"project": "memory-plugin",
-	})
-	fkv.clock += 1000
-	r3 := invoke(t, fkv, "store", map[string]any{
-		"content": "Researching memory systems",
-		"tags":    []string{"research", "memory"},
-		"project": "research",
-	})
-
-	if r1["stored"] != true || r1["id"] != float64(1) {
-		t.Fatalf("first store = %v", r1)
-	}
-	if r3["id"] != float64(3) {
-		t.Fatalf("third id = %v, want 3", r3["id"])
-	}
-	if _, has := r1["displaced"]; has {
-		t.Fatalf("a store below capacity displaced something: %v", r1)
-	}
+	seedNoteFull(t, fkv, 1, "Reading the plugin framework design docs", []string{"plugin", "design"}, "memory-plugin")
+	seedNoteFull(t, fkv, 2, "Writing the working memory plugin code", []string{"plugin", "code"}, "memory-plugin")
+	seedNoteFull(t, fkv, 3, "Researching memory systems", []string{"research", "memory"}, "research")
 
 	rec := invoke(t, fkv, "recent", map[string]any{"limit": 10})
 	notes := rec["notes"].([]any)
@@ -238,41 +696,33 @@ func TestStoreAndRecent(t *testing.T) {
 
 func TestStoreAndSearch(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "Reading the plugin framework design docs", "tags": []string{"plugin", "design"}, "project": "memory-plugin"})
-	fkv.clock += 1000
-	invoke(t, fkv, "store", map[string]any{"content": "Writing the working memory plugin code", "tags": []string{"plugin", "code"}, "project": "memory-plugin"})
-	fkv.clock += 1000
-	invoke(t, fkv, "store", map[string]any{"content": "Researching memory systems", "tags": []string{"research", "memory"}, "project": "research"})
-	fkv.clock += 1000
+	// 0.6.0: search is host-routed, so retrieval assertions run
+	// against the host record after the migration walk carries the
+	// legacy notes in. project scoping itself is a legacy-KV feature,
+	// tested where it lives (recent, update).
+	seedNoteFull(t, fkv, 1, "Reading the plugin framework design docs", []string{"plugin", "design"}, "memory-plugin")
+	seedNoteFull(t, fkv, 2, "Writing the working memory plugin code", []string{"plugin", "code"}, "memory-plugin")
+	seedNoteFull(t, fkv, 3, "Researching memory systems", []string{"research", "memory"}, "research")
 
 	res := invoke(t, fkv, "search", map[string]any{"query": "plugin"})
-	results := res["results"].([]any)
-	if len(results) != 2 {
-		t.Fatalf("search 'plugin' results = %d, want 2", len(results))
+	if res["count"] != float64(2) || res["matched"] != float64(2) || res["shown"] != float64(2) || res["truncated"] != false {
+		t.Fatalf("coverage = count %v matched %v shown %v truncated %v", res["count"], res["matched"], res["shown"], res["truncated"])
 	}
-	for _, r := range results {
-		if r.(map[string]any)["score"].(float64) < 1 {
-			t.Fatalf("score below 1: %v", r)
+	for _, r := range res["results"].([]any) {
+		m := r.(map[string]any)
+		if m["match"] != "exact_words" {
+			t.Fatalf("match mode = %v", m["match"])
+		}
+		if m["similarity"].(float64) != 0 {
+			t.Fatalf("exact_words similarity = %v", m["similarity"])
 		}
 	}
-	if res["scanned"] != float64(3) || res["matched"] != float64(2) || res["truncated"] != false {
-		t.Fatalf("coverage = scanned %v matched %v truncated %v", res["scanned"], res["matched"], res["truncated"])
-	}
 
-	res2 := invoke(t, fkv, "search", map[string]any{"query": "plugin", "project": "memory-plugin"})
-	if len(res2["results"].([]any)) != 2 {
-		t.Fatalf("scoped search results = %d, want 2", len(res2["results"].([]any)))
-	}
-
-	// Two terms: note 3 scores 4 (both in content and tags), note 2 scores 1.
 	res3 := invoke(t, fkv, "search", map[string]any{"query": "research memory"})
-	results3 := res3["results"].([]any)
-	if len(results3) != 2 {
-		t.Fatalf("two-term results = %d, want 2", len(results3))
-	}
-	top := results3[0].(map[string]any)
-	if top["id"] != float64(3) || top["score"] != float64(4) {
-		t.Fatalf("two-term top = %v", top)
+	// broker-family all-words matching: only the note carrying every
+	// term answers (the old KV engine's OR over terms is retired with it)
+	if res3["count"] != float64(1) {
+		t.Fatalf("two-term results = %v, want 1 under all-words matching", res3["count"])
 	}
 }
 
@@ -300,28 +750,35 @@ func TestSearchCoversTheWholeStoreAtCapacity(t *testing.T) {
 	}
 	res := invoke(t, fkv, "search", map[string]any{"query": "sentinel"})
 	results := res["results"].([]any)
-	if len(results) != 1 || results[0].(map[string]any)["id"] != float64(1) {
+	if len(results) != 1 || results[0].(map[string]any)["snippet"] != "sentinel zeroth note" {
 		t.Fatalf("the oldest note is not searchable: %v", res)
 	}
-	if res["scanned"] != float64(maxNotes) {
-		t.Fatalf("scanned = %v, want %d", res["scanned"], maxNotes)
+	if res["matched"] != float64(1) {
+		t.Fatalf("matched = %v, want 1", res["matched"])
 	}
 }
 
 func TestSearchSortsByScoreThenNewest(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "alpha is here"})
-	fkv.clock++
-	invoke(t, fkv, "store", map[string]any{"content": "alpha appears", "tags": []string{"alpha"}})
-	fkv.clock++
+	// 0.6.0: ranking is host-decided (rank + decay, carrd policy);
+	// the fake host models exact-words matching only, so this test
+	// asserts the honest subset: both notes reachable, the facade's
+	// passthrough fields present.
+	seedNote(t, fkv, 1, "alpha is here")
+	seedNote(t, fkv, 2, "alpha appears")
 	res := invoke(t, fkv, "search", map[string]any{"query": "alpha"})
 	results := res["results"].([]any)
 	if len(results) != 2 {
 		t.Fatalf("results = %d, want 2", len(results))
 	}
-	first := results[0].(map[string]any)
-	if first["id"] != float64(2) || first["score"] != float64(2) {
-		t.Fatalf("top result = %v, want id 2 with score 2", first)
+	for _, r := range results {
+		m := r.(map[string]any)
+		if m["match"] != "exact_words" {
+			t.Fatalf("hit = %v", m)
+		}
+	}
+	if res["policy"] != "carrd" {
+		t.Fatalf("policy = %v", res["policy"])
 	}
 }
 
@@ -340,10 +797,8 @@ func TestRecentLimit(t *testing.T) {
 
 func TestProjectScoping(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "Alpha project note", "project": "alpha"})
-	fkv.clock += 1000
-	invoke(t, fkv, "store", map[string]any{"content": "Beta project note", "project": "beta"})
-	fkv.clock += 1000
+	seedNoteFull(t, fkv, 1, "Alpha project note", nil, "alpha")
+	seedNoteFull(t, fkv, 2, "Beta project note", nil, "beta")
 	rec := invoke(t, fkv, "recent", map[string]any{"project": "alpha", "limit": 10})
 	notes := rec["notes"].([]any)
 	if len(notes) != 1 || notes[0].(map[string]any)["project"] != "alpha" {
@@ -355,11 +810,13 @@ func TestProjectScoping(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "A test note for retrieval", "tags": []string{"test"}})
-	fkv.clock += 1000
+	seedNoteFull(t, fkv, 1, "A test note for retrieval", []string{"test"}, "")
 	res := invoke(t, fkv, "get", map[string]any{"id": 1})
 	if res["found"] != true || res["content"] != "A test note for retrieval" {
 		t.Fatalf("get = %v", res)
+	}
+	if tags := res["tags"].([]any); len(tags) != 1 || tags[0] != "test" {
+		t.Fatalf("get tags = %v", tags)
 	}
 	res2 := invoke(t, fkv, "get", map[string]any{"id": 999})
 	if res2["found"] != false {
@@ -370,10 +827,8 @@ func TestGet(t *testing.T) {
 
 func TestGetReportsEvicted(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "note that will be evicted"})
-	fkv.clock += 1000
+	seedNote(t, fkv, 1, "note that will be evicted")
 	invoke(t, fkv, "evict", map[string]any{"id": 1})
-	fkv.clock += 1000
 	g := invoke(t, fkv, "get", map[string]any{"id": 1})
 	if g["found"] != true || g["evicted"] != true || g["content"] != "note that will be evicted" {
 		t.Fatalf("evicted get = %v", g)
@@ -382,10 +837,8 @@ func TestGetReportsEvicted(t *testing.T) {
 
 func TestEvict(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "Note to be evicted", "tags": []string{"temporary"}})
-	fkv.clock += 1000
-	invoke(t, fkv, "store", map[string]any{"content": "Note that stays", "tags": []string{"permanent"}})
-	fkv.clock += 1000
+	seedNoteFull(t, fkv, 1, "Note to be evicted", []string{"temporary"}, "")
+	seedNoteFull(t, fkv, 2, "Note that stays", []string{"permanent"}, "")
 
 	if res := invoke(t, fkv, "evict", map[string]any{"id": 1}); res["evicted"] != true {
 		t.Fatalf("evict = %v", res)
@@ -395,8 +848,11 @@ func TestEvict(t *testing.T) {
 	if len(notes) != 1 || notes[0].(map[string]any)["id"] != float64(2) {
 		t.Fatalf("recent after evict = %v", notes)
 	}
-	if res := invoke(t, fkv, "search", map[string]any{"query": "evicted"}); len(res["results"].([]any)) != 0 {
-		t.Fatalf("search found an evicted note: %v", res)
+	// 0.6.0: an evicted legacy note never reaches the host record —
+	// the migration walk skips evicted notes, so host search cannot
+	// find what KV never carried in.
+	if res := invoke(t, fkv, "search", map[string]any{"query": "evicted"}); res["matched"] != float64(0) {
+		t.Fatalf("search matched an evicted note: %v", res)
 	}
 	if res := invoke(t, fkv, "evict", map[string]any{"id": 999}); res["evicted"] != false || res["reason"] != "not found" {
 		t.Fatalf("evict missing = %v", res)
@@ -408,8 +864,9 @@ func TestEvict(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	fkv := newFakeKV()
-	r := invoke(t, fkv, "store", map[string]any{"content": "original content", "tags": []string{"draft"}, "project": "alpha"})
-	id := r["id"]
+	seedNoteFull(t, fkv, 1, "original content", []string{"draft"}, "alpha")
+	id := any(float64(1))
+	created := invoke(t, fkv, "get", map[string]any{"id": id})["created_ms"]
 	fkv.clock += 5000
 
 	u := invoke(t, fkv, "update", map[string]any{"id": id, "content": "revised content"})
@@ -417,8 +874,8 @@ func TestUpdate(t *testing.T) {
 		t.Fatalf("update = %v", u)
 	}
 	g := invoke(t, fkv, "get", map[string]any{"id": id})
-	if g["content"] != "revised content" || g["created_ms"] != r["created_ms"] || g["updated_ms"] != u["updated_ms"] {
-		t.Fatalf("after update: %v (store %v, update %v)", g, r, u)
+	if g["content"] != "revised content" || g["created_ms"] != created || g["updated_ms"] != u["updated_ms"] {
+		t.Fatalf("after update: %v (update %v)", g, u)
 	}
 
 	fkv.clock += 1000
@@ -454,12 +911,12 @@ func TestUpdate(t *testing.T) {
 func TestRecall(t *testing.T) {
 	fkv := newFakeKV()
 	base := fkv.clock
-	invoke(t, fkv, "store", map[string]any{"content": "morning note"})
+	seedNote(t, fkv, 1, "morning note")
 	fkv.clock += 3600_000
 	mid := fkv.clock
-	invoke(t, fkv, "store", map[string]any{"content": "afternoon note"})
+	seedNote(t, fkv, 2, "afternoon note")
 	fkv.clock += 3600_000
-	invoke(t, fkv, "store", map[string]any{"content": "evening note"})
+	seedNote(t, fkv, 3, "evening note")
 
 	r1 := invoke(t, fkv, "recall", map[string]any{"after_ms": mid})
 	if r1["count"] != float64(1) || r1["notes"].([]any)[0].(map[string]any)["content"] != "evening note" {
@@ -507,27 +964,32 @@ func TestEmptyContentIsRefused(t *testing.T) {
 
 func TestTagsAreValidated(t *testing.T) {
 	fkv := newFakeKV()
-	refused(t, fkv, "store", map[string]any{"content": "numbers are not tags", "tags": []int{1, 2}})
-	refused(t, fkv, "store", map[string]any{"content": "a string is not an array", "tags": "alpha"})
-	refused(t, fkv, "store", map[string]any{"content": "the separator is reserved", "tags": []string{"a|b"}})
-	refused(t, fkv, "store", map[string]any{"content": "empty tags mean nothing", "tags": []string{""}})
-	r := invoke(t, fkv, "store", map[string]any{"content": "an empty array is fine", "tags": []string{}})
-	if tags := invoke(t, fkv, "get", map[string]any{"id": r["id"]})["tags"].([]any); len(tags) != 0 {
-		t.Fatalf("tags = %v, want none", tags)
+	// 0.6.0: store is host-routed and refuses tags outright (no
+	// silent no-ops on the facade); tag validation itself lives on
+	// update, the remaining tags-capable writer.
+	refused(t, fkv, "store", map[string]any{"content": "an empty array is fine", "tags": []string{}})
+	seedNoteFull(t, fkv, 1, "an empty array is fine", []string{}, "")
+	r := invoke(t, fkv, "update", map[string]any{"id": 1, "tags": []string{"ok-tag"}})
+	if r["updated"] != true {
+		t.Fatalf("valid tags update = %v", r)
 	}
+	if tags := invoke(t, fkv, "get", map[string]any{"id": 1})["tags"].([]any); len(tags) != 1 || tags[0] != "ok-tag" {
+		t.Fatalf("tags = %v", tags)
+	}
+	refused(t, fkv, "update", map[string]any{"id": 1, "tags": []int{1, 2}})
+	refused(t, fkv, "update", map[string]any{"id": 1, "tags": "alpha"})
+	refused(t, fkv, "update", map[string]any{"id": 1, "tags": []string{"a|b"}})
+	refused(t, fkv, "update", map[string]any{"id": 1, "tags": []string{""}})
 	if s := invoke(t, fkv, "stats", map[string]any{}); s["occupancy"] != float64(1) {
-		t.Fatalf("a refused store left a trace: %v", s)
+		t.Fatalf("a refused update left a trace: %v", s)
 	}
-	refused(t, fkv, "update", map[string]any{"id": r["id"], "tags": []string{"x|y"}})
 }
 
 func TestTagEscaping(t *testing.T) {
 	fkv := newFakeKV()
-	r := invoke(t, fkv, "store", map[string]any{
-		"content": "Note with special tag characters",
-		"tags":    []string{`quote"tag`, `back\slash`, "new\nline", "controlchar", "ünïcödé 🎉"},
-	})
-	tags := invoke(t, fkv, "get", map[string]any{"id": r["id"]})["tags"].([]any)
+	seedNote(t, fkv, 1, "Note with special tag characters")
+	invoke(t, fkv, "update", map[string]any{"id": 1, "content": "Note with special tag characters", "tags": []string{`quote"tag`, `back\slash`, "new\nline", "controlchar", "ünïcödé 🎉"}})
+	tags := invoke(t, fkv, "get", map[string]any{"id": 1})["tags"].([]any)
 	want := []string{`quote"tag`, `back\slash`, "new\nline", "controlchar", "ünïcödé 🎉"}
 	if len(tags) != len(want) {
 		t.Fatalf("tag count = %d, want %d", len(tags), len(want))
@@ -542,182 +1004,22 @@ func TestTagEscaping(t *testing.T) {
 func TestContentWithUnicode(t *testing.T) {
 	fkv := newFakeKV()
 	content := "Unicode test: 日本語 emoji 🎉 and quotes \"inline\""
-	r := invoke(t, fkv, "store", map[string]any{"content": content})
-	if g := invoke(t, fkv, "get", map[string]any{"id": r["id"]}); g["content"] != content {
+	seedNote(t, fkv, 1, content)
+	if g := invoke(t, fkv, "get", map[string]any{"id": 1}); g["content"] != content {
 		t.Fatalf("content round-trip: got %q", g["content"])
 	}
-	if res := invoke(t, fkv, "search", map[string]any{"query": "日本語"}); len(res["results"].([]any)) != 1 {
+	if res := invoke(t, fkv, "search", map[string]any{"query": "日本語"}); res["matched"] != float64(1) {
 		t.Fatalf("unicode search = %v", res)
 	}
 }
 
 // ─── Capacity, reclaim, displacement ──────────────────────────────
 
-func TestLRUNoteIsReclaimedAtCapacity(t *testing.T) {
-	fkv := newFakeKV()
-	fill(t, fkv, maxNotes, "note number")
-	stats := invoke(t, fkv, "stats", map[string]any{})
-	if stats["occupancy"] != float64(maxNotes) || stats["remaining"] != float64(0) {
-		t.Fatalf("after fill: %v", stats)
-	}
-	for i := 0; i < 5; i++ {
-		invoke(t, fkv, "get", map[string]any{"id": 1})
-	}
-	r := invoke(t, fkv, "store", map[string]any{"content": "the note that triggers reclaim"})
-	if r["stored"] != true || r["id"] != float64(maxNotes+1) {
-		t.Fatalf("store at capacity = %v", r)
-	}
-	displaced, _ := r["displaced"].(map[string]any)
-	if displaced == nil || displaced["id"] != float64(2) || displaced["evicted"] != false {
-		t.Fatalf("displaced = %v, want the least recently used alive note 2", r["displaced"])
-	}
-	if g := invoke(t, fkv, "get", map[string]any{"id": 1}); g["found"] != true {
-		t.Fatalf("the most recently used note was reclaimed: %v", g)
-	}
-	if g := invoke(t, fkv, "get", map[string]any{"id": 2}); g["found"] != false {
-		t.Fatalf("note 2 should be gone: %v", g)
-	}
-	if s := invoke(t, fkv, "stats", map[string]any{}); s["occupancy"] != float64(maxNotes) {
-		t.Fatalf("occupancy after reclaim = %v", s)
-	}
-}
-
-func TestZombiesAreReclaimedFirst(t *testing.T) {
-	fkv := newFakeKV()
-	fill(t, fkv, maxNotes, "living note")
-	invoke(t, fkv, "evict", map[string]any{"id": 5})
-	if s := invoke(t, fkv, "stats", map[string]any{}); s["zombieq"] != float64(1) {
-		t.Fatalf("zombieq = %v", s["zombieq"])
-	}
-	r := invoke(t, fkv, "store", map[string]any{"content": "the note that needs a slot"})
-	displaced, _ := r["displaced"].(map[string]any)
-	if displaced == nil || displaced["id"] != float64(5) || displaced["evicted"] != true {
-		t.Fatalf("displaced = %v, want the zombie 5", r["displaced"])
-	}
-	if g := invoke(t, fkv, "get", map[string]any{"id": 5}); g["found"] != false {
-		t.Fatalf("zombie 5 should be hard-deleted: %v", g)
-	}
-	if g := invoke(t, fkv, "get", map[string]any{"id": 1}); g["found"] != true || g["evicted"] != false {
-		t.Fatalf("living note 1 should survive: %v", g)
-	}
-	s := invoke(t, fkv, "stats", map[string]any{})
-	if s["occupancy"] != float64(maxNotes) || s["zombieq"] != float64(0) {
-		t.Fatalf("after reclaim: %v", s)
-	}
-}
-
-func TestReclaimNeverStrandsANote(t *testing.T) {
-	fkv := newFakeKV()
-	fill(t, fkv, maxNotes, "living note")
-	invoke(t, fkv, "evict", map[string]any{"id": 5})
-	invoke(t, fkv, "store", map[string]any{"content": "reclaims zombie five"})
-	r := invoke(t, fkv, "store", map[string]any{"content": "second store after the hole"})
-	if r["stored"] != true {
-		t.Fatalf("store = %v", r)
-	}
-	if g := invoke(t, fkv, "get", map[string]any{"id": 1}); g["found"] != false {
-		t.Fatalf("note 1 should be cleanly reclaimed: %v", g)
-	}
-	for _, id := range []int64{2, 3} {
-		if g := invoke(t, fkv, "get", map[string]any{"id": id}); g["found"] != true || g["evicted"] != false {
-			t.Fatalf("note %d should be alive: %v", id, g)
-		}
-	}
-	res := invoke(t, fkv, "search", map[string]any{"query": "note"})
-	if res["scanned"] != float64(maxNotes) || res["matched"] != float64(maxNotes-2) {
-		t.Fatalf("index and store diverge: scanned %v matched %v", res["scanned"], res["matched"])
-	}
-}
-
-func TestARefusedDeleteKeepsTheNoteVisible(t *testing.T) {
-	fkv := newFakeKV()
-	fkv.maxKeys = maxNotes + 1 // the notes and the index
-	fill(t, fkv, maxNotes, "living note")
-
-	fail := map[string]any{"status": "failed", "reason": "the store declined the delete", "reasonCode": "KV_DELETE_FAILED"}
-	fkv.failNextDelete = &fail
-	r := invoke(t, fkv, "store", map[string]any{"content": "arrives while the delete is refused"})
-	// Since 0.5.1 a store that fails because the reclaim's delete was
-	// refused reports WORKING_SET_RECLAIM_REFUSED carrying the store's
-	// own reason, not the put's KV_QUOTA_EXCEEDED: the two conditions
-	// ask different questions of the caller (retry now vs never).
-	if r["stored"] != false || r["refused"] != true || r["reasonCode"] != "WORKING_SET_RECLAIM_REFUSED" {
-		t.Fatalf("store during a refused delete = %v, want a structured refusal", r)
-	}
-	if d, _ := r["detail"].(string); !strings.Contains(d, "KV_DELETE_FAILED") {
-		t.Fatalf("refusal detail should carry the store's delete reason, got %q", d)
-	}
-	if _, has := r["displaced"]; has {
-		t.Fatalf("nothing was displaced, yet: %v", r)
-	}
-	// The note whose delete was refused still holds its key and is
-	// still indexed (inspected directly: a get would touch it).
-	if _, ok := fkv.store["n/1"]; !ok {
-		t.Fatal("the note whose delete was refused lost its key")
-	}
-	if s := invoke(t, fkv, "stats", map[string]any{}); s["occupancy"] != float64(maxNotes) {
-		t.Fatalf("occupancy after the refusal = %v, want %d", s["occupancy"], maxNotes)
-	}
-
-	// The next store retries the reclaim and succeeds against the
-	// same least recently used note.
-	r2 := invoke(t, fkv, "store", map[string]any{"content": "arrives once the store cooperates"})
-	displaced, _ := r2["displaced"].(map[string]any)
-	if r2["stored"] != true || displaced == nil || displaced["id"] != float64(1) {
-		t.Fatalf("store after the refusal = %v", r2)
-	}
-	if s := invoke(t, fkv, "stats", map[string]any{}); s["occupancy"] != float64(maxNotes) {
-		t.Fatalf("occupancy after the retry = %v", s["occupancy"])
-	}
-}
-
-func TestStoreRollsBackWhenTheNoteWriteFails(t *testing.T) {
-	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "before"})
-	fail := map[string]any{"status": "failed", "reason": "value too large", "reasonCode": "KV_VALUE_TOO_LARGE"}
-	fkv.failNextPut = &fail
-	fkv.failPutKey = "n/2"
-	r := invoke(t, fkv, "store", map[string]any{"content": "will fail at the note put"})
-	if fkv.failedPutKey != "n/2" || fkv.failNextPut != nil {
-		t.Fatalf("the note write was not the one that failed: key=%q pending=%v", fkv.failedPutKey, fkv.failNextPut)
-	}
-	if _, exists := fkv.store["n/2"]; exists {
-		t.Fatal("the failed note persisted")
-	}
-	if r["stored"] != false || r["refused"] != true || r["reasonCode"] != "KV_VALUE_TOO_LARGE" {
-		t.Fatalf("refusal = %v", r)
-	}
-	if s := invoke(t, fkv, "stats", map[string]any{}); s["occupancy"] != float64(1) {
-		t.Fatalf("occupancy after rollback = %v, want 1", s["occupancy"])
-	}
-	if r2 := invoke(t, fkv, "store", map[string]any{"content": "reuse"}); r2["id"] != float64(2) {
-		t.Fatalf("id after rollback = %v, want 2 (the reservation was returned)", r2["id"])
-	}
-}
-
-func TestQuotaRefusalIsStructured(t *testing.T) {
-	fkv := newFakeKV()
-	fail := map[string]any{"status": "failed", "reason": "11 keys at the 11-key ceiling", "reasonCode": "KV_QUOTA_EXCEEDED"}
-	fkv.failNextPut = &fail
-	r := invoke(t, fkv, "store", map[string]any{"content": "over quota"})
-	if r["stored"] != false || r["refused"] != true || r["reasonCode"] != "KV_QUOTA_EXCEEDED" {
-		t.Fatalf("refusal = %v", r)
-	}
-	if r2 := invoke(t, fkv, "store", map[string]any{"content": "after quota"}); r2["stored"] != true {
-		t.Fatalf("store after the refusal = %v", r2)
-	}
-}
-
-// ─── Stats and the scope verdict ──────────────────────────────────
-
 func TestStats(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "Note in project A", "project": "alpha"})
-	fkv.clock += 1000
-	invoke(t, fkv, "store", map[string]any{"content": "Another note in project A", "project": "alpha"})
-	fkv.clock += 1000
-	invoke(t, fkv, "store", map[string]any{"content": "Note in project B", "project": "beta"})
-	fkv.clock += 1000
+	seedNoteFull(t, fkv, 1, "Note in project A", nil, "alpha")
+	seedNoteFull(t, fkv, 2, "Another note in project A", nil, "alpha")
+	seedNoteFull(t, fkv, 3, "Note in project B", nil, "beta")
 	invoke(t, fkv, "evict", map[string]any{"id": 2})
 
 	res := invoke(t, fkv, "stats", map[string]any{})
@@ -734,9 +1036,10 @@ func TestStats(t *testing.T) {
 
 func TestStatsListsProjectsInAStableOrder(t *testing.T) {
 	fkv := newFakeKV()
+	i := int64(1)
 	for _, p := range []string{"beta", "alpha", "gamma", "alpha", "gamma"} {
-		invoke(t, fkv, "store", map[string]any{"content": "note in " + p, "project": p})
-		fkv.clock++
+		seedNoteFull(t, fkv, i, "note in "+p, nil, p)
+		i++
 	}
 	projects := invoke(t, fkv, "stats", map[string]any{})["projects"].([]any)
 	got := make([]string, 0, len(projects))
@@ -754,13 +1057,18 @@ func TestScopeVerdictIsReported(t *testing.T) {
 	if s := invoke(t, fkv, "stats", map[string]any{}); s["kv_scope"] != "unknown" {
 		t.Fatalf("before any put, kv_scope = %v, want unknown", s["kv_scope"])
 	}
+	// 0.6.0: store never writes KV, so the scope probe is update —
+	// the plugin's remaining writer. seedNote populates the store map
+	// directly (no kv.put), so a seeded set records no scope; the
+	// verdict shows through the first real write.
+	seedNote(t, fkv, 1, "legacy note")
 	fkv.scope = "temp"
-	invoke(t, fkv, "store", map[string]any{"content": "temp note"})
+	invoke(t, fkv, "update", map[string]any{"id": 1, "content": "revised under the temp scope"})
 	if s := invoke(t, fkv, "stats", map[string]any{}); s["kv_scope"] != "temp" {
 		t.Fatalf("kv_scope = %v, want temp", s["kv_scope"])
 	}
 	fkv.scope = "persistent"
-	invoke(t, fkv, "store", map[string]any{"content": "persistent note"})
+	invoke(t, fkv, "update", map[string]any{"id": 1, "content": "revised under the persistent scope"})
 	if s := invoke(t, fkv, "stats", map[string]any{}); s["kv_scope"] != "persistent" {
 		t.Fatalf("kv_scope = %v, want persistent", s["kv_scope"])
 	}
@@ -770,12 +1078,12 @@ func TestScopeVerdictIsReported(t *testing.T) {
 
 func TestHealthDropsStaleIndexEntries(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "note one"})
-	invoke(t, fkv, "store", map[string]any{"content": "note two"})
+	seedNote(t, fkv, 1, "note one")
+	seedNote(t, fkv, 2, "note two")
 	editMeta(t, fkv, `"recent":"`, `"recent":"99 `)
 
 	h := invoke(t, fkv, "health", map[string]any{})
-	if h["healthy"] != false || h["stale_dropped"] != float64(1) || h["kv_scope"] != "persistent" {
+	if h["healthy"] != false || h["stale_dropped"] != float64(1) {
 		t.Fatalf("health = %v", h)
 	}
 	h2 := invoke(t, fkv, "health", map[string]any{})
@@ -786,8 +1094,8 @@ func TestHealthDropsStaleIndexEntries(t *testing.T) {
 
 func TestHealthDropsDuplicateIndexEntries(t *testing.T) {
 	fkv := newFakeKV()
-	invoke(t, fkv, "store", map[string]any{"content": "note one"})
-	invoke(t, fkv, "store", map[string]any{"content": "note two"})
+	seedNote(t, fkv, 1, "note one")
+	seedNote(t, fkv, 2, "note two")
 	editMeta(t, fkv, `"recent":"2 1"`, `"recent":"2 2 1"`)
 	h := invoke(t, fkv, "health", map[string]any{})
 	if h["healthy"] != false || h["stale_dropped"] != float64(1) || h["occupancy"] != float64(2) {
@@ -817,17 +1125,6 @@ func TestHealthRequeuesAnEvictedNoteTheQueueLost(t *testing.T) {
 	}
 	if s := invoke(t, fkv, "stats", map[string]any{}); s["zombieq"] != float64(1) {
 		t.Fatalf("stats after repair = %v", s)
-	}
-
-	// The requeued zombie is reclaimed before any living note.
-	fill(t, fkv, maxNotes-3, "filler")
-	r := invoke(t, fkv, "store", map[string]any{"content": "the store that needs a slot"})
-	displaced, _ := r["displaced"].(map[string]any)
-	if displaced == nil || displaced["id"] != float64(1) || displaced["evicted"] != true {
-		t.Fatalf("displaced = %v, want the requeued zombie 1", r["displaced"])
-	}
-	if g := invoke(t, fkv, "get", map[string]any{"id": 2}); g["found"] != true || g["evicted"] != false {
-		t.Fatalf("living note 2 was reclaimed: %v", g)
 	}
 }
 
@@ -990,127 +1287,6 @@ func equalIDs(a, b []int64) bool {
 	return true
 }
 
-/*
-	A pinned note is shielded from capacity reclaim even when it is the
-
-least recently used note in the index: the walk skips it, takes the
-oldest unpinned note instead, and the pinned note stays retrievable.
-*/
-func TestPinnedNoteIsNotReclaimedAtCapacity(t *testing.T) {
-	fkv := newFakeKV()
-	fill(t, fkv, maxNotes-1, "note")
-	r := invoke(t, fkv, "store", map[string]any{"content": "the pinned one", "pinned": true})
-	pinnedID := r["id"].(float64)
-
-	for i := 1; i < maxNotes; i++ {
-		invoke(t, fkv, "get", map[string]any{"id": i})
-		fkv.clock++
-	}
-
-	r = invoke(t, fkv, "store", map[string]any{"content": "one more"})
-	displaced, _ := r["displaced"].(map[string]any)
-	if displaced == nil {
-		t.Fatalf("store at capacity displaced nothing: %v", r)
-	}
-	if displaced["id"] == pinnedID {
-		t.Fatalf("the pinned note was displaced: %v", r)
-	}
-	if displaced["id"] != float64(1) {
-		t.Fatalf("expected the oldest unpinned note (1), got %v", displaced["id"])
-	}
-	g := invoke(t, fkv, "get", map[string]any{"id": pinnedID})
-	if g["found"] != true || g["pinned"] != true {
-		t.Fatalf("pinned note not retrievable after reclaim: %v", g)
-	}
-}
-
-/*
-	When every alive note is pinned, a store at capacity refuses with
-
-the pinned refusal code, reports stored=false, and displaces nothing —
-a structured envelope, not a transport failure.
-*/
-func TestAllPinnedRefusesWithCode(t *testing.T) {
-	fkv := newFakeKV()
-	for i := 0; i < maxNotes; i++ {
-		invoke(t, fkv, "store", map[string]any{
-			"content": fmt.Sprintf("pinned note %d", i),
-			"pinned":  true,
-		})
-		fkv.clock++
-	}
-
-	result := call(t, fkv, "store", map[string]any{"content": "one too many"})
-	if result["status"] != "succeeded" {
-		t.Fatalf("a capacity refusal is a structured envelope, not a transport failure: %v", result)
-	}
-	or, _ := result["operation_result"].(map[string]any)
-	if or == nil || or["refused"] != true {
-		t.Fatalf("expected a refused envelope: %v", result)
-	}
-	if or["reasonCode"] != "WORKING_SET_AT_CAPACITY_PINNED" {
-		t.Fatalf("reasonCode = %v", or["reasonCode"])
-	}
-	if or["stored"] != false {
-		t.Fatalf("a refused store must report stored=false: %v", or)
-	}
-	if _, has := or["displaced"]; has {
-		t.Fatalf("a pinned refusal must not claim a displaced note: %v", or)
-	}
-	if d, _ := or["detail"].(string); d == "" {
-		t.Fatalf("the refusal carries no detail: %v", or)
-	}
-}
-
-/*
-	A store refusing a read or delete during reclaim produces a
-
-structured refusal naming the store's own reason, de-indexes nothing,
-and burns no id reservation; the next store retries the same reclaim
-and succeeds.
-*/
-func TestReclaimRefusedIsStructuredAndRetries(t *testing.T) {
-	fkv := newFakeKV()
-	fill(t, fkv, maxNotes, "note")
-	fkv.failDeleteKey = "n/1"
-
-	result := call(t, fkv, "store", map[string]any{"content": "while refused"})
-	if result["status"] != "succeeded" {
-		t.Fatalf("a reclaim refusal is a structured envelope, not a transport failure: %v", result)
-	}
-	or, _ := result["operation_result"].(map[string]any)
-	if or == nil || or["refused"] != true || or["reasonCode"] != "WORKING_SET_RECLAIM_REFUSED" {
-		t.Fatalf("expected WORKING_SET_RECLAIM_REFUSED, got: %v", result)
-	}
-	detail, _ := or["detail"].(string)
-	if !strings.Contains(detail, "KV_DELETE_REFUSED") || !strings.Contains(detail, "injected sustained delete failure") {
-		t.Fatalf("the store's own reason was lost: %q", detail)
-	}
-	if _, ok := fkv.store["n/1"]; !ok {
-		t.Fatal("the refused delete removed the key anyway")
-	}
-	rec := invoke(t, fkv, "recent", map[string]any{"mode": "oldest", "limit": 5})
-	notes := rec["notes"].([]any)
-	if len(notes) == 0 || notes[0].(map[string]any)["id"] != float64(1) {
-		t.Fatalf("note 1 must head the oldest walk after a refused reclaim (the default recent view clamps to %d and cannot see the tail): %v", maxLimit, notes)
-	}
-
-	fkv.failDeleteKey = ""
-	r := invoke(t, fkv, "store", map[string]any{"content": "after clearing"})
-	if r["stored"] != true || r["id"] != float64(maxNotes+1) {
-		t.Fatalf("retry after a refused reclaim (no id may be burned): %v", r)
-	}
-	displaced, _ := r["displaced"].(map[string]any)
-	if displaced == nil || displaced["id"] != float64(1) {
-		t.Fatalf("the retry should reclaim note 1: %v", r)
-	}
-}
-
-/*
-	mode=oldest walks the same recency order from the tail; the default
-
-order and the mode echo are unchanged; an unknown mode is refused.
-*/
 func TestRecentOldestMode(t *testing.T) {
 	fkv := newFakeKV()
 	fill(t, fkv, 5, "note")
@@ -1148,7 +1324,10 @@ func TestRecentOldestMode(t *testing.T) {
 func TestStatsReportsPinned(t *testing.T) {
 	fkv := newFakeKV()
 	fill(t, fkv, 3, "note")
-	invoke(t, fkv, "store", map[string]any{"content": "pinned note", "pinned": true})
+	// 0.6.0: pinned stores are refused on the host-routed path, so the
+	// pinned note is seeded as 0.5.x history and patched to pinned.
+	seedNote(t, fkv, 4, "pinned note")
+	editNote(t, fkv, 4, `"pinned":false`, `"pinned":true`)
 
 	s := invoke(t, fkv, "stats", map[string]any{})
 	if s["pinned"] != float64(1) {
@@ -1162,14 +1341,18 @@ func TestStatsReportsPinned(t *testing.T) {
 /*
 	Eviction is a pinned note's only exit: an evicted pinned note stays
 
-readable by id, leaves search and recent, and is reclaimed first —
-before any alive note — at the next capacity store.
+readable by id and leaves search and recent. 0.6.0: store never writes
+KV, so occupancy is frozen below capacity and the reclaim-at-capacity
+tail is retired contract — the pin shield now guards only evict.
 */
 func TestEvictExitsPinned(t *testing.T) {
 	fkv := newFakeKV()
 	fill(t, fkv, maxNotes-1, "note")
-	r := invoke(t, fkv, "store", map[string]any{"content": "pinned and then evicted", "pinned": true})
-	pinnedID := r["id"].(float64)
+	// 0.6.0: pinned stores are refused on the host-routed path, so the
+	// pinned note is seeded as 0.5.x history and patched to pinned.
+	seedNote(t, fkv, int64(maxNotes), "pinned and then evicted")
+	editNote(t, fkv, int64(maxNotes), `"pinned":false`, `"pinned":true`)
+	pinnedID := float64(maxNotes)
 
 	e := invoke(t, fkv, "evict", map[string]any{"id": pinnedID})
 	if e["evicted"] != true {
@@ -1180,19 +1363,26 @@ func TestEvictExitsPinned(t *testing.T) {
 		t.Fatalf("soft-evicted pinned note not readable by id: %v", g)
 	}
 
-	r = invoke(t, fkv, "store", map[string]any{"content": "takes the zombie slot"})
-	displaced, _ := r["displaced"].(map[string]any)
-	if displaced == nil || displaced["id"] != pinnedID {
-		t.Fatalf("the evicted pinned note should be reclaimed first: %v", r)
+	// 0.6.0 retired contract: store no longer displaces at capacity
+	// (occupancy is frozen below it), so the reclaim receipt is gone.
+	// What survives of the tail: the evicted note is out of the living
+	// set. recent clamps at maxLimit, so count is the clamp over the
+	// living set — the evicted head must be skipped, not clamped away.
+	r := invoke(t, fkv, "recent", map[string]any{"limit": maxNotes})
+	if r["count"] != float64(maxLimit) {
+		t.Fatalf("recent count = %v, want the %d-note clamp over %d living notes", r["count"], maxLimit, maxNotes-1)
 	}
-	if displaced["evicted"] != true {
-		t.Fatalf("the displaced receipt should name it evicted: %v", displaced)
+	notes := r["notes"].([]any)
+	if notes[0].(map[string]any)["id"] != float64(maxNotes-1) {
+		t.Fatalf("recent head = %v, want %d — the evicted note must be skipped, not clamped away", notes[0].(map[string]any)["id"], maxNotes-1)
 	}
-	if _, ok := fkv.store[fmt.Sprintf("n/%d", int(pinnedID))]; ok {
-		t.Fatal("the reclaimed note's key survived the reclaim")
+	for _, ni := range notes {
+		if ni.(map[string]any)["id"] == pinnedID {
+			t.Fatal("the evicted pinned note is still listed in recent")
+		}
 	}
-	g = invoke(t, fkv, "get", map[string]any{"id": pinnedID})
-	if g["found"] != false {
-		t.Fatalf("a reclaimed note must be gone: %v", g)
+	g2 := invoke(t, fkv, "get", map[string]any{"id": pinnedID})
+	if g2["found"] != true || g2["evicted"] != true {
+		t.Fatalf("get on the evicted pinned note must still read: %v", g2)
 	}
 }
