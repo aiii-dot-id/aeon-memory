@@ -1,0 +1,11 @@
+{
+  "name": "search matches notes by a shared word (word and substring)",
+  "operation": "search",
+  "arguments": {
+    "query": "notes"
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"count\":1"
+  }
+}

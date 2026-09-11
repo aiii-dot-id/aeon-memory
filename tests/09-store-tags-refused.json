@@ -1,0 +1,14 @@
+{
+  "name": "store refuses tags with a named reason",
+  "operation": "store",
+  "arguments": {
+    "content": "tag me",
+    "tags": [
+      "design"
+    ]
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}

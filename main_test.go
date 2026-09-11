@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+	"unicode"
 
 	sdk "github.com/aiii-dot-id/aii-plugin-sdk/pkg/aiiosdk"
 )
@@ -43,10 +46,60 @@ type fakeKV struct {
 
 // fakeMemory is one host-side record as the fake broker holds it.
 type fakeMemory struct {
-	ID       string
-	Text     string
-	Time     int64
-	Accesses int
+	ID           string
+	Text         string
+	Time         int64
+	Accesses     int
+	SupersededBy string
+	Created      time.Time
+}
+
+// fakeMemoryWords and fakeMemoryNormal mirror the stand-in host's
+// normalization (cmd/aiisdk/harness_memory.go): letters and digits
+// lowercased, everything else a separator.
+func fakeMemoryWords(text string) map[string]bool {
+	out := map[string]bool{}
+	var cur strings.Builder
+	flush := func() {
+		if cur.Len() > 0 {
+			out[cur.String()] = true
+			cur.Reset()
+		}
+	}
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			cur.WriteRune(rune(unicode.ToLower(r)))
+			continue
+		}
+		flush()
+	}
+	flush()
+	return out
+}
+
+func fakeMemoryNormal(text string) string {
+	words := fakeMemoryWords(text)
+	keys := make([]string, 0, len(words))
+	for w := range words {
+		keys = append(keys, w)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, " ")
+}
+
+// fakeHarnessMeaning is the stand-in's meaning disclosure, mirrored.
+var fakeHarnessMeaning = map[string]any{
+	"status": "source_unavailable", "basis": "",
+	"detail": "the harness has no embeddings model; words and substrings answered",
+}
+
+func fakeMemoryHit(m *fakeMemory, match string, score float64) map[string]any {
+	return map[string]any{
+		"id": m.ID, "text": m.Text, "snippet": m.Text, "match": match,
+		"score": score, "strength": 1.0, "fused": score, "attribution": "plugin", "ring": 4,
+		"time": m.Created.Format(time.RFC3339Nano), "accesses": m.Accesses, "class": "operational",
+		"superseded_by": m.SupersededBy,
+	}
 }
 
 func newFakeKV() *fakeKV {
@@ -127,64 +180,75 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 			f.failNextRemember = nil
 			return json.Marshal(fail)
 		}
-		// Broker rule: supersedes mints a NEW id, keeps the old memory
-		// for audit, answers outcome=updated naming the predecessor.
+		// Mirrors cmd/aiisdk/harness_memory.go, the stand-in the
+		// qualification harness runs: hm_N ids, supersedes requires a
+		// current memory (MEMORY_NOT_FOUND otherwise), normalized-word
+		// reinforce, created/updated carry the new memory's stamp.
 		sup, _ := obj.Object("arguments").String("supersedes")
+		if strings.TrimSpace(text) == "" {
+			return json.Marshal(map[string]any{
+				"status":     "failed",
+				"reasonCode": "OPERATION_ARGUMENT_INVALID",
+			})
+		}
+		now := time.UnixMilli(f.clock).UTC()
 		if sup != "" {
-			known := false
-			for _, mm := range f.memories {
-				if mm.ID == sup {
-					known = true
+			var old *fakeMemory
+			for i := range f.memories {
+				if f.memories[i].ID == sup {
+					old = &f.memories[i]
 				}
 			}
-			if !known {
+			if old == nil || old.SupersededBy != "" {
 				return json.Marshal(map[string]any{
 					"status":     "failed",
-					"reason":     "superseded id is unknown to the host",
-					"reasonCode": "MEMORY_TARGET_INVALID",
+					"reason":     "not a current memory",
+					"reasonCode": "MEMORY_NOT_FOUND",
 				})
 			}
-			id := "m" + strconv.Itoa(f.mClock)
 			f.mClock++
-			f.memories = append(f.memories, fakeMemory{ID: id, Text: text, Time: f.clock})
+			id := "hm_" + strconv.Itoa(f.mClock)
+			f.memories = append(f.memories, fakeMemory{ID: id, Text: text, Time: f.clock, Created: now})
+			old.SupersededBy = id
 			return json.Marshal(map[string]any{
 				"status": "succeeded",
 				"operation_result": map[string]any{
 					"id":         id,
 					"outcome":    "updated",
 					"of":         sup,
-					"created_at": strconv.FormatInt(f.clock, 10),
-					"scope":      "persistent",
+					"created_at": now.Format(time.RFC3339Nano),
+					"scope":      "harness",
 				},
 			})
 		}
-		// Broker rule: a remember at ≥0.92 similarity to an existing memory
-		// reinforces it. The fake models the threshold as exact-text match —
-		// the only honest simplification without embeddings.
+		// Mirrors the stand-in: reinforce is normalized-words equality
+		// (same word set, any order/case), not exact text.
+		normal := fakeMemoryNormal(text)
 		for i := range f.memories {
-			if f.memories[i].Text == text {
+			if f.memories[i].SupersededBy == "" && fakeMemoryNormal(f.memories[i].Text) == normal {
 				f.memories[i].Accesses++
 				return json.Marshal(map[string]any{
 					"status": "succeeded",
 					"operation_result": map[string]any{
 						"id":         f.memories[i].ID,
 						"outcome":    "reinforced",
-						"created_at": strconv.FormatInt(f.memories[i].Time, 10),
-						"scope":      "persistent",
+						"of":         f.memories[i].ID,
+						"created_at": f.memories[i].Created.Format(time.RFC3339Nano),
+						"scope":      "harness",
 					},
 				})
 			}
 		}
-		id := "m" + strconv.Itoa(f.mClock)
 		f.mClock++
-		f.memories = append(f.memories, fakeMemory{ID: id, Text: text, Time: f.clock})
+		id := "hm_" + strconv.Itoa(f.mClock)
+		f.memories = append(f.memories, fakeMemory{ID: id, Text: text, Time: f.clock, Created: now})
 		return json.Marshal(map[string]any{
 			"status": "succeeded",
 			"operation_result": map[string]any{
 				"id":         id,
 				"outcome":    "created",
-				"created_at": strconv.FormatInt(f.clock, 10),
-				"scope":      "persistent",
+				"created_at": now.Format(time.RFC3339Nano),
+				"scope":      "harness",
 			},
 		})
 
@@ -196,24 +260,27 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 		}
 		query, _ := obj.Object("arguments").String("query")
 		idArg, _ := obj.Object("arguments").String("id")
+		// Mirrors the stand-in: currentMemory finds any id (superseded
+		// included), id hits carry policy none, truncated false, the
+		// meaning disclosure, and reinforce the memory (accesses++).
 		if idArg != "" {
-			for _, mm := range f.memories {
-				if mm.ID == idArg {
-					return json.Marshal(map[string]any{
-						"status": "succeeded",
-						"operation_result": map[string]any{
-							"status":  "found",
-							"matched": 1,
-							"shown":   1,
-							"policy":  "carrd",
-							"hits": []any{map[string]any{
-								"id": mm.ID, "text": mm.Text, "snippet": mm.Text,
-								"match": "id", "score": 1.0, "strength": 1.0,
-								"time": strconv.FormatInt(mm.Time, 10),
-							}},
-						},
-					})
+			for i := range f.memories {
+				if f.memories[i].ID != idArg {
+					continue
 				}
+				f.memories[i].Accesses++
+				return json.Marshal(map[string]any{
+					"status": "succeeded",
+					"operation_result": map[string]any{
+						"status":    "found",
+						"matched":   1,
+						"shown":     1,
+						"policy":    "none",
+						"truncated": false,
+						"meaning":   fakeHarnessMeaning,
+						"hits":      []any{fakeMemoryHit(&f.memories[i], "id", 1.0)},
+					},
+				})
 			}
 			return json.Marshal(map[string]any{
 				"status":     "failed",
@@ -221,53 +288,90 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 				"reasonCode": "MEMORY_NOT_FOUND",
 			})
 		}
-		if query == "" {
+		type fakeScored struct {
+			m     *fakeMemory
+			match string
+			score float64
+		}
+		var found []fakeScored
+		qwords := fakeMemoryWords(query)
+		lowerQuery := strings.ToLower(query)
+		for i := range f.memories {
+			m := &f.memories[i]
+			if m.SupersededBy != "" {
+				continue
+			}
+			lower := strings.ToLower(m.Text)
+			mwords := fakeMemoryWords(m.Text)
+			all := len(qwords) > 0
+			for w := range qwords {
+				if !mwords[w] {
+					all = false
+					break
+				}
+			}
+			if all && strings.Contains(lower, lowerQuery) {
+				found = append(found, fakeScored{m, "both", 1.0})
+			} else if all {
+				found = append(found, fakeScored{m, "exact_words", 0.9})
+			} else if strings.Contains(lower, lowerQuery) {
+				found = append(found, fakeScored{m, "fuzzy", 0.5})
+			}
+		}
+		sort.SliceStable(found, func(i, j int) bool {
+			if found[i].score != found[j].score {
+				return found[i].score > found[j].score
+			}
+			return found[i].m.Created.After(found[j].m.Created)
+		})
+		matched := len(found)
+		limit := 7
+		if v, ok := obj.Object("arguments").Int("limit"); ok && v != 0 {
+			limit = int(v)
+		}
+		if limit < 0 || limit > 50 {
 			return json.Marshal(map[string]any{
 				"status":     "failed",
-				"reason":     "memory.recall requires arguments.query or arguments.id",
+				"reason":     "limit out of range",
 				"reasonCode": "OPERATION_ARGUMENT_INVALID",
 			})
 		}
-		hits := make([]any, 0, 8)
-		matched := 0
-		for _, mm := range f.memories {
-			all := true
-			// broker-family matching: every word must appear, any order,
-			// case-insensitive (the aii-os recall contract)
-			for _, w := range strings.Fields(query) {
-				if !strings.Contains(strings.ToLower(mm.Text), strings.ToLower(w)) {
-					all = false
-				}
-			}
-			if !all {
-				continue
-			}
-			matched++
-			hits = append(hits, map[string]any{
-				"id": mm.ID, "text": mm.Text, "snippet": mm.Text,
-				"match": "exact_words", "score": 1.0, "strength": 1.0,
-				"time": strconv.FormatInt(mm.Time, 10),
+		decay, _ := obj.Object("arguments").String("decay")
+		if decay != "" && decay != "carrd" && decay != "none" {
+			return json.Marshal(map[string]any{
+				"status":     "failed",
+				"reason":     "decay must be carrd or none",
+				"reasonCode": "OPERATION_ARGUMENT_INVALID",
 			})
 		}
-		limit := 7
-		if v, ok := obj.Object("arguments").Int("limit"); ok && v > 0 {
-			limit = int(v)
+		policy := decay
+		if policy == "" {
+			policy = "carrd"
 		}
-		shown := len(hits)
-		truncated := shown > limit
+		truncated := matched > limit
 		if truncated {
-			hits = hits[:limit]
-			shown = limit
+			found = found[:limit]
+		}
+		hits := make([]any, 0, len(found))
+		for _, s := range found {
+			s.m.Accesses++
+			hits = append(hits, fakeMemoryHit(s.m, s.match, s.score))
+		}
+		status := "found"
+		if matched == 0 {
+			status = "found_nothing"
+		} else if truncated {
+			status = "partial"
 		}
 		return json.Marshal(map[string]any{
 			"status": "succeeded",
 			"operation_result": map[string]any{
-				"status":    "found",
+				"status":    status,
 				"matched":   matched,
-				"shown":     shown,
-				"policy":    "carrd",
+				"shown":     len(hits),
+				"policy":    policy,
 				"truncated": truncated,
-				"meaning":   map[string]any{"status": "found_nothing", "detail": "the fake harness names no embeddings model", "basis": "none"},
+				"meaning":   fakeHarnessMeaning,
 				"hits":      hits,
 			},
 		})
@@ -563,8 +667,8 @@ func TestSearchIsHostRouted(t *testing.T) {
 		t.Fatalf("results = %d, want 1", len(results))
 	}
 	hit := results[0].(map[string]any)
-	if hit["id"] != "m0" {
-		t.Fatalf("hit id = %v, want m0 (the migration walk Remembers note 1 first)", hit["id"])
+	if hit["id"] != "hm_1" {
+		t.Fatalf("hit id = %v, want hm_1 (the migration walk Remembers note 1 first)", hit["id"])
 	}
 	// The migration walk ran: both seeded notes were Remembered.
 	if len(fkv.memories) != 2 {
@@ -596,10 +700,10 @@ func TestSearchCarriesMeaningDisclosure(t *testing.T) {
 	if meaning == nil {
 		t.Fatalf("meaning disclosure missing: %v", res)
 	}
-	if meaning["status"] != "found_nothing" {
-		t.Fatalf("meaning status = %v (the fake host names no model)", meaning["status"])
+	if meaning["status"] != "source_unavailable" {
+		t.Fatalf("meaning status = %v (the stand-in names no model)", meaning["status"])
 	}
-	if meaning["basis"] != "none" {
+	if meaning["basis"] != "" {
 		t.Fatalf("meaning basis = %v", meaning["basis"])
 	}
 }
@@ -645,10 +749,11 @@ func TestStatsReportsHostCounters(t *testing.T) {
 	}
 	// The first host-routed act runs the walk.
 	invoke(t, fkv, "store", map[string]any{"content": "a fresh host-routed note"})
-	// After: the counters survive the store that triggered them.
+	// After: the walk carried two, and the triggering store created
+	// its own — host_created counts both (live acts, not just the walk).
 	s2 := invoke(t, fkv, "stats", map[string]any{})
-	if s2["host_created"] != float64(2) {
-		t.Fatalf("host_created = %v, want 2", s2["host_created"])
+	if s2["host_created"] != float64(3) {
+		t.Fatalf("host_created = %v, want 3 (2 carried + 1 live store)", s2["host_created"])
 	}
 	if s2["host_reinforced"] != float64(0) || s2["host_updated"] != float64(0) || s2["host_skipped"] != float64(0) {
 		t.Fatalf("host counters after the walk = %v", s2)
@@ -710,17 +815,19 @@ func TestStoreAndSearch(t *testing.T) {
 	}
 	for _, r := range res["results"].([]any) {
 		m := r.(map[string]any)
-		if m["match"] != "exact_words" {
+		if m["match"] != "both" {
 			t.Fatalf("match mode = %v", m["match"])
 		}
 		if m["similarity"].(float64) != 0 {
-			t.Fatalf("exact_words similarity = %v", m["similarity"])
+			t.Fatalf("both similarity = %v", m["similarity"])
 		}
 	}
 
-	res3 := invoke(t, fkv, "search", map[string]any{"query": "research memory"})
+	res3 := invoke(t, fkv, "search", map[string]any{"query": "memory systems"})
 	// broker-family all-words matching: only the note carrying every
-	// term answers (the old KV engine's OR over terms is retired with it)
+	// term answers — note 2 has "memory" but not "systems", so it is
+	// excluded; matching is whole-word, so "research" alone would not
+	// reach "Researching" either (the old KV engine's OR is retired)
 	if res3["count"] != float64(1) {
 		t.Fatalf("two-term results = %v, want 1 under all-words matching", res3["count"])
 	}
@@ -773,7 +880,7 @@ func TestSearchSortsByScoreThenNewest(t *testing.T) {
 	}
 	for _, r := range results {
 		m := r.(map[string]any)
-		if m["match"] != "exact_words" {
+		if m["match"] != "both" {
 			t.Fatalf("hit = %v", m)
 		}
 	}

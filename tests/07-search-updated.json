@@ -1,8 +1,8 @@
 {
-  "name": "search recalls a stored note by a word it contains (both: word and substring)",
+  "name": "search finds the superseding text, not the superseded",
   "operation": "search",
   "arguments": {
-    "query": "matched"
+    "query": "volatile"
   },
   "expect": {
     "status": "succeeded",

@@ -1,11 +1,11 @@
 {
-  "name": "evict soft-deletes note 1",
+  "name": "evict on a fresh record reports not found (succeeded, not a refusal)",
   "operation": "evict",
   "arguments": {
     "id": 1
   },
   "expect": {
     "status": "succeeded",
-    "result_contains": "\"evicted\":true"
+    "result_contains": "\"evicted\":false"
   }
 }

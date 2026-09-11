@@ -1,12 +1,12 @@
 {
-  "name": "update revises note 2 in place",
+  "name": "update on a fresh record reports not found (succeeded, not a refusal)",
   "operation": "update",
   "arguments": {
     "id": 2,
-    "content": "Search reports scanned, matched and truncated."
+    "content": "update target text"
   },
   "expect": {
     "status": "succeeded",
-    "result_contains": "\"updated\":true"
+    "result_contains": "\"updated\":false"
   }
 }

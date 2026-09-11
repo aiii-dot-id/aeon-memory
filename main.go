@@ -676,6 +676,20 @@ func newMemoryPlugin() *sdk.Plugin {
 			}
 			return nil, err
 		}
+		// Count the act alongside the walk's counters so stats shows
+		// the live split: migration counts what it carried, these
+		// count every host-routed act since (VERB-MAPPING.md).
+		if m, err := loadMeta(); err == nil && m != nil {
+			switch rem.Outcome {
+			case "created":
+				m.migCreated++
+			case "reinforced":
+				m.migReinforced++
+			case "updated":
+				m.migUpdated++
+			}
+			saveMeta(m)
+		}
 		out := map[string]any{
 			"stored":  true,
 			"id":      rem.ID,

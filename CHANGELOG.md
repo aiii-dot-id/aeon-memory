@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.1 (2026-09-14)
+
+- Qualification drift repaired. The 0.6.0 release changed the store
+  contract (tags, project and pinned refused with named reasons; the
+  reply carries the host's verdict) but left the qualification case
+  suite asserting the 0.5.x contract: cases 01-02 sent the refused
+  arguments, so the seed notes never existed and eight later cases
+  failed behind them. The suite now asserts the 0.6.x contract end to
+  end over the stand-in host: created/reinforced/updated outcomes,
+  supersedes, the one-time migration block, all-words matching with
+  `both`/`exact_words` match modes, the three refusals, and the
+  fresh-record working set (store no longer writes KV, so recent,
+  get, stats answer over an empty legacy set — the populated-set
+  contracts stay covered by the native tests that seed KV directly).
+- CI granted the host verbs: the worker-oracle stage ran
+  `aiisdk test -grant kv` only, so the host-routed paths were never
+  exercised in CI — the drift could not have been caught there. The
+  grant line is now `-grant kv,memory`.
+- Schemas tell the truth about the inputs: `store_in` no longer
+  advertises tags, project or pinned (all refused since 0.6.0);
+  `store_out` documents the one-time migration block; `search_out`
+  names the `both` match mode.
+
 ## 0.6.0 (2026-09-13)
 
 - Host-routed durable acts (R101): `store` now delegates to the host's

@@ -32,21 +32,7 @@
     },
     "migration": {
       "type": "object",
-      "description": "Carried once on the first host-routed act after upgrade: the legacy KV set replayed into the host record, oldest first.",
-      "properties": {
-        "created": {
-          "type": "integer"
-        },
-        "reinforced": {
-          "type": "integer"
-        },
-        "updated": {
-          "type": "integer"
-        },
-        "skipped": {
-          "type": "integer"
-        }
-      }
+      "description": "One-time report from the migration walk (first durable act after upgrade): counts of legacy notes carried into the host record. Absent on every later act."
     }
   },
   "required": [

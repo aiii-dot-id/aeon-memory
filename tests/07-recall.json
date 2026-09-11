@@ -1,11 +1,11 @@
 {
-  "name": "recall returns both notes after time zero",
+  "name": "recall on a fresh record answers empty",
   "operation": "recall",
   "arguments": {
     "after_ms": 0
   },
   "expect": {
     "status": "succeeded",
-    "result_contains": "\"count\":2"
+    "result_contains": "\"count\":0"
   }
 }

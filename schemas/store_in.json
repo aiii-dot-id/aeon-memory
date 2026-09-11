@@ -6,24 +6,11 @@
     "content": {
       "type": "string",
       "minLength": 1,
-      "description": "The note to keep."
+      "description": "The note to keep, through to the host's memory record."
     },
-    "tags": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "description": "Tags for keyword search: non-empty strings without '|'."
-    },
-    "project": {
+    "supersedes": {
       "type": "string",
-      "description": "Optional project scope."
-    },
-    "pinned": {
-      "type": "boolean",
-      "default": false,
-      "description": "Exempt this note from capacity reclaim. A pinned note is never displaced by a new store; eviction is its only exit."
+      "description": "Host memory id to supersede: a new memory is minted, the old is kept for audit, surfaced only through its successor."
     }
   },
   "required": [

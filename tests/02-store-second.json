@@ -1,15 +1,11 @@
 {
-  "name": "store keeps a second note as id 2",
+  "name": "a second distinct note is created and no migration block repeats",
   "operation": "store",
   "arguments": {
-    "content": "Search reports how many notes it scanned and matched.",
-    "tags": [
-      "search"
-    ],
-    "project": "memory"
+    "content": "Search reports how many notes it matched."
   },
   "expect": {
     "status": "succeeded",
-    "result_contains": "\"id\":2"
+    "result_contains": "\"outcome\":\"created\""
   }
 }

@@ -1,0 +1,12 @@
+{
+  "name": "stats reports an empty working set with migration done",
+  "operation": "stats",
+  "arguments": {},
+  "expect": {
+    "status": "succeeded",
+    "result_contains": [
+      "\"alive\":0",
+      "\"host_created\":2"
+    ]
+  }
+}

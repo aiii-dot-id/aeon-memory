@@ -1,8 +1,8 @@
 {
-  "name": "recent on a fresh record answers an empty working set",
+  "name": "recent reports the working set is empty on a fresh record",
   "operation": "recent",
   "arguments": {
-    "limit": 1
+    "limit": 5
   },
   "expect": {
     "status": "succeeded",

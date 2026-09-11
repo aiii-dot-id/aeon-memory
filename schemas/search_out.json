@@ -40,7 +40,7 @@
           },
           "match": {
             "type": "string",
-            "description": "exact_words, fuzzy, meaning, or id."
+            "description": "exact_words, both, fuzzy, meaning, or id."
           },
           "similarity": {
             "type": "number"

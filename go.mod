@@ -12,9 +12,7 @@ require (
 
 tool github.com/aiii-dot-id/aii-plugin-sdk/cmd/aiisdk
 
-// Development rides the local kit tree: the memory instruments (sdk.Memory)
-// landed in 8ca7677, which is not yet resolvable through the public module
-// proxy or GOPROXY=direct from this sandbox. The replace drops the day the
-// pseudo-version v0.0.0-20260910211819-8ca7677f61e02efc resolves publicly;
-// the require advances to it in the same edit.
+// Development rides the local kit tree until the kit push reaches GitHub:
+// sdk.Memory landed in 8ca7677, public proxy still serves 13b764a. The
+// replace drops the day the canonical pseudo-version resolves publicly.
 replace github.com/aiii-dot-id/aii-plugin-sdk => ../aii-plugin-sdk
