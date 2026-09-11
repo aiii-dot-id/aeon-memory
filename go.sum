@@ -1,5 +1,5 @@
-github.com/aiii-dot-id/aii-plugin-sdk v0.0.0-20260910095813-13b764a0ff18 h1:6TwGf0M62WN4quNE7UlvgG+kvGemxR2mzWIwsMZ/aWU=
-github.com/aiii-dot-id/aii-plugin-sdk v0.0.0-20260910095813-13b764a0ff18/go.mod h1:X+z7TgRm7eVNrGPvFwx6B2q6MaYoskX5GmQeG31EOFY=
+github.com/aiii-dot-id/aii-plugin-sdk v0.0.0-20260911113258-96148ddaca7f h1:0md+1ekqO+jDserHS5daSvL+vfUkC4AsI53Spu75D6k=
+github.com/aiii-dot-id/aii-plugin-sdk v0.0.0-20260911113258-96148ddaca7f/go.mod h1:X+z7TgRm7eVNrGPvFwx6B2q6MaYoskX5GmQeG31EOFY=
 github.com/cloudflare/circl v1.6.3 h1:9GPOhQGF9MCYUeXyMYlqTR6a5gTrgR/fBLXvUgtVcg8=
 github.com/cloudflare/circl v1.6.3/go.mod h1:2eXP6Qfat4O/Yhh8BznvKnJ+uzEoTQ6jVKJRn81BiS4=
 golang.org/x/crypto v0.30.0 h1:RwoQn3GkWiMkzlX562cLB7OxWvjH1L8xutO2WoJcRoY=

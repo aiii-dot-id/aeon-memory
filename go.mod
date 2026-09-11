@@ -2,7 +2,7 @@ module github.com/aiii-dot-id/aeon-memory
 
 go 1.25
 
-require github.com/aiii-dot-id/aii-plugin-sdk v0.0.0-20260910095813-13b764a0ff18
+require github.com/aiii-dot-id/aii-plugin-sdk v0.0.0-20260911113258-96148ddaca7f
 
 require (
 	github.com/cloudflare/circl v1.6.3 // indirect
@@ -11,8 +11,3 @@ require (
 )
 
 tool github.com/aiii-dot-id/aii-plugin-sdk/cmd/aiisdk
-
-// Development rides the local kit tree until the kit push reaches GitHub:
-// sdk.Memory landed in 8ca7677, public proxy still serves 13b764a. The
-// replace drops the day the canonical pseudo-version resolves publicly.
-replace github.com/aiii-dot-id/aii-plugin-sdk => ../aii-plugin-sdk
