@@ -727,12 +727,11 @@ func newMemoryPlugin() *sdk.Plugin {
 		if !ok || query == "" {
 			return nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "search requires arguments.query (non-empty string)")
 		}
-		// The first host-routed act after upgrade carries the legacy
-		// notes in, so the new search can find them.
-		mig, err := migrateIfDue()
-		if err != nil {
-			return nil, err
-		}
+		// Migration rides store (0.6.3): a first-activation write
+		// belongs to the write verb, where memory.remember is
+		// in-class. Search is purely read.internal — a read verb
+		// must not mutate, even benevolently; the policy gate was
+		// right to refuse the under-declaring reach.
 		limit := limitArgument(c)
 		exact, _ := c.Args().Bool("exact")
 		opts := []sdk.RecallOption{sdk.Limit(int(limit))}
@@ -771,9 +770,6 @@ func newMemoryPlugin() *sdk.Plugin {
 				"detail": rr.MeaningDetail,
 				"basis":  rr.MeaningBasis,
 			}
-		}
-		if mig != nil {
-			out["migration"] = mig
 		}
 		return out, nil
 	})

@@ -658,31 +658,52 @@ func TestSearchIsHostRouted(t *testing.T) {
 	seedNote(t, fkv, 1, "alpha note about gardens")
 	fkv.clock += 1000
 	seedNote(t, fkv, 2, "beta note about rivers")
+
+	// 0.6.3 boundary: search is a pure read.internal verb. Before the
+	// first store, the legacy KV set is NOT visible to search —
+	// migration rides store (the write verb), not search.
 	res := invoke(t, fkv, "search", map[string]any{"query": "gardens"})
-	if res["status"] != "found" {
-		t.Fatalf("status = %v", res["status"])
+	if res["status"] != "found_nothing" {
+		t.Fatalf("pre-store status = %v, want found_nothing", res["status"])
 	}
-	results := res["results"].([]any)
+	if _, has := res["migration"]; has {
+		t.Fatalf("pre-store search carried a migration block: %v", res)
+	}
+	meaning, _ := res["meaning"].(map[string]any)
+	if meaning == nil {
+		t.Fatalf("pre-store meaning disclosure missing: %v", res)
+	}
+
+	// First store carries the legacy notes in: the walk runs on the
+	// write verb and its report rides store's reply.
+	st := invoke(t, fkv, "store", map[string]any{"content": "gamma note about deltas"})
+	if st["stored"] != true {
+		t.Fatalf("store = %v", st)
+	}
+	if len(fkv.memories) != 3 {
+		t.Fatalf("memories = %d, want 3 after migration+store (2 carried + 1 new)", len(fkv.memories))
+	}
+	mig, _ := st["migration"].(map[string]any)
+	if mig == nil || mig["migrated"] != true || mig["created"] != float64(2) {
+		t.Fatalf("store's migration report = %v", mig)
+	}
+
+	// After the store, search sees the host record — carried notes
+	// included — and never carries a migration block of its own.
+	res2 := invoke(t, fkv, "search", map[string]any{"query": "gardens"})
+	if res2["status"] != "found" {
+		t.Fatalf("post-store status = %v", res2["status"])
+	}
+	results := res2["results"].([]any)
 	if len(results) != 1 {
 		t.Fatalf("results = %d, want 1", len(results))
 	}
 	hit := results[0].(map[string]any)
 	if hit["id"] != "hm_1" {
-		t.Fatalf("hit id = %v, want hm_1 (the migration walk Remembers note 1 first)", hit["id"])
+		t.Fatalf("hit id = %v, want hm_1 (note 1 carried by the store-time walk)", hit["id"])
 	}
-	// The migration walk ran: both seeded notes were Remembered.
-	if len(fkv.memories) != 2 {
-		t.Fatalf("memories = %d, want 2 after migration", len(fkv.memories))
-	}
-	mig, _ := res["migration"].(map[string]any)
-	if mig["migrated"] != true || mig["created"] != float64(2) {
-		t.Fatalf("migration report = %v", mig)
-	}
-	// Second search: no migration block (done is done), and the
-	// coverage fields are the host's own.
-	res2 := invoke(t, fkv, "search", map[string]any{"query": "rivers"})
 	if _, has := res2["migration"]; has {
-		t.Fatalf("second search carried a migration block: %v", res2)
+		t.Fatalf("search carried a migration block: %v", res2)
 	}
 	if res2["matched"] != float64(1) || res2["shown"] != float64(1) {
 		t.Fatalf("coverage = matched %v shown %v", res2["matched"], res2["shown"])
@@ -801,13 +822,15 @@ func TestStoreAndRecent(t *testing.T) {
 
 func TestStoreAndSearch(t *testing.T) {
 	fkv := newFakeKV()
-	// 0.6.0: search is host-routed, so retrieval assertions run
-	// against the host record after the migration walk carries the
-	// legacy notes in. project scoping itself is a legacy-KV feature,
-	// tested where it lives (recent, update).
+	// 0.6.3: search is host-routed and read.internal; migration rides
+	// store. The first store carries the legacy notes in, and only
+	// then do retrieval assertions run against the host record.
+	// project scoping itself is a legacy-KV feature, tested where it
+	// lives (recent, update).
 	seedNoteFull(t, fkv, 1, "Reading the plugin framework design docs", []string{"plugin", "design"}, "memory-plugin")
 	seedNoteFull(t, fkv, 2, "Writing the working memory plugin code", []string{"plugin", "code"}, "memory-plugin")
 	seedNoteFull(t, fkv, 3, "Researching memory systems", []string{"research", "memory"}, "research")
+	invoke(t, fkv, "store", map[string]any{"content": "carry-in trigger for the migration walk"})
 
 	res := invoke(t, fkv, "search", map[string]any{"query": "plugin"})
 	if res["count"] != float64(2) || res["matched"] != float64(2) || res["shown"] != float64(2) || res["truncated"] != false {
@@ -873,6 +896,9 @@ func TestSearchSortsByScoreThenNewest(t *testing.T) {
 	// passthrough fields present.
 	seedNote(t, fkv, 1, "alpha is here")
 	seedNote(t, fkv, 2, "alpha appears")
+	// 0.6.3: migration rides store, not search — trigger the carry-in
+	// before retrieval assertions.
+	invoke(t, fkv, "store", map[string]any{"content": "carry-in trigger for the migration walk"})
 	res := invoke(t, fkv, "search", map[string]any{"query": "alpha"})
 	results := res["results"].([]any)
 	if len(results) != 2 {
@@ -1000,6 +1026,13 @@ func TestUpdate(t *testing.T) {
 		t.Fatalf("tags after clearing = %v", tags)
 	}
 
+	// 0.6.3: update is a KV verb; the host record learns a legacy
+	// note's current content only through a store-time carry-in. So
+	// the revised content is invisible to search until then.
+	if s := invoke(t, fkv, "search", map[string]any{"query": "revised"}); s["status"] != "found_nothing" {
+		t.Fatalf("pre-carry-in search for revised content = %v, want found_nothing", s)
+	}
+	invoke(t, fkv, "store", map[string]any{"content": "carry-in trigger for the migration walk"})
 	if s := invoke(t, fkv, "search", map[string]any{"query": "revised"}); len(s["results"].([]any)) != 1 {
 		t.Fatalf("search for revised content = %v", s)
 	}
@@ -1115,6 +1148,9 @@ func TestContentWithUnicode(t *testing.T) {
 	if g := invoke(t, fkv, "get", map[string]any{"id": 1}); g["content"] != content {
 		t.Fatalf("content round-trip: got %q", g["content"])
 	}
+	// 0.6.3: migration rides store — trigger the carry-in before the
+	// host-side unicode assertion.
+	invoke(t, fkv, "store", map[string]any{"content": "carry-in trigger for the migration walk"})
 	if res := invoke(t, fkv, "search", map[string]any{"query": "日本語"}); res["matched"] != float64(1) {
 		t.Fatalf("unicode search = %v", res)
 	}

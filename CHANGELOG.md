@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.3 (2026-09-14)
+
+- Under-declared effects repaired. `search` declared
+  `EffectsReadInternal` while its handler performed a first-activation
+  write: `migrateIfDue()` carrying legacy KV notes into the host record
+  via `memory.remember`. The policy gate refused it live —
+  `POLICY_DENY: search declares effects read.internal; memory.remember
+  is outside that class` (2026-09-14, item 8's restore probe) — and the
+  gate was right. Migration now rides `store`, the write verb where
+  `memory.remember` is in-class and the migration walk already lived;
+  `search` is purely `read.internal`. SDK evidence decided the design:
+  `Effects` is a single constant (no unions), and a read-only grant
+  refuses `write.local` operations, so declaring search write-class
+  would have broken recall under read-only — a regression for a read
+  verb. Cost named honestly: search-before-first-store sees the host
+  record only — which is search's literal contract ("recall from the
+  host's memory record"); legacy notes stay reachable meanwhile via
+  `recent` + `get`. VERB-MAPPING.md's migration section updated as
+  design of record. The `migration` reply field left search's output
+  with the call; no schema change.
+
 ## 0.6.2 (2026-09-12)
 
 - Envelope defect repaired. `store` and `search` declared only

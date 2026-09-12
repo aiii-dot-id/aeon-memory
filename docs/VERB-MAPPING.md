@@ -94,9 +94,9 @@ protection for `evict` decisions, not reclaim.
 ## Migration (acceptance item 3) — carry forward, evidence-bound
 
 The legacy texts must be findable by the new `search`, or the move
-splits the record in two. Design: lazily, at the first `store` or
-`search` after the upgrade (the SDK offers no activation hook — the
-plugin wakes on invocations only), the plugin walks alive non-evicted
+splits the record in two. Design (0.6.3, design of record): lazily, at
+the first `store` after the upgrade (the SDK offers no activation hook —
+the plugin wakes on invocations only), the plugin walks alive non-evicted
 KV notes and `Remember`s each text. Per-note mapping keys were
 considered and **rejected**: the store's 256-key ceiling is already
 full (255 notes + meta), and the host's ≥ 0.92 reinforce rule makes a
