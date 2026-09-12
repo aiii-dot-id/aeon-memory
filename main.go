@@ -635,7 +635,7 @@ func newMemoryPlugin() *sdk.Plugin {
 		Input:        "schemas/store_in.json",
 		Output:       "schemas/store_out.json",
 		Effects:      sdk.EffectsWriteLocal,
-		Capabilities: []string{memoryCapability},
+		Capabilities: []string{memoryCapability, kvCapability},
 	})
 	p.Handle("store", func(c sdk.Call) (any, error) {
 		content, ok := c.Args().String("content")
@@ -720,7 +720,7 @@ func newMemoryPlugin() *sdk.Plugin {
 		Input:        "schemas/search_in.json",
 		Output:       "schemas/search_out.json",
 		Effects:      sdk.EffectsReadInternal,
-		Capabilities: []string{memoryCapability},
+		Capabilities: []string{memoryCapability, kvCapability},
 	})
 	p.Handle("search", func(c sdk.Call) (any, error) {
 		query, ok := c.Args().String("query")

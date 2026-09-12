@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.2 (2026-09-12)
+
+- Envelope defect repaired. `store` and `search` declared only
+  `ring4.memory` in their per-operation capabilities while both
+  execute KV paths at runtime — `store` for the migration carry-in
+  (`migrateIfDue`) and the index load/save; `search` for the same
+  carry-in. Since the Ring 0 scope (2026-09-05) checks each call
+  against the operation's *own* declaration, both operations were
+  refused live with `CAPABILITY_NOT_IN_STATIC_ENVELOPE (ring4.kv)`
+  — first observed 2026-09-12 17:20:10 during the read-only grant
+  test, discovered dual-seat (Aeon's receipt and the aii.log lines
+  185/187). Both descriptors now declare
+  `[]string{memoryCapability, kvCapability}`; the other seven
+  operations already declared `ring4.kv` where they touch it and are
+  untouched. Plugin-level envelope unchanged.
+
 ## 0.6.1 (2026-09-14)
 
 - Qualification drift repaired. The 0.6.0 release changed the store
