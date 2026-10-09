@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "search output",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "integer",
+      "description": "Hits shown after the limit."
+    },
+    "matched": {
+      "type": "integer",
+      "description": "Total hits before the limit."
+    },
+    "shown": {
+      "type": "integer",
+      "description": "Hits shown after the limit (equals count)."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "True when matched exceeded the limit."
+    },
+    "meaning": {
+      "type": "object",
+      "description": "The meaning layer's honest disclosure, passed through from the host: found_nothing names no basis."
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host memory id (m-prefixed)."
+          },
+          "text": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "match": {
+            "type": "string",
+            "description": "exact_words, both, fuzzy, meaning, or id."
+          },
+          "similarity": {
+            "type": "number"
+          },
+          "score": {
+            "type": "number"
+          },
+          "strength": {
+            "type": "number"
+          },
+          "time": {
+            "type": "string",
+            "description": "Host-stamped time, ms since epoch."
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "count"
+  ]
+}

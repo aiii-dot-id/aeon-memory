@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "store input",
+  "type": "object",
+  "properties": {
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The note to keep, through to the host's memory record."
+    },
+    "supersedes": {
+      "type": "string",
+      "description": "Host memory id to supersede: a new memory is minted, the old is kept for audit, surfaced only through its successor."
+    }
+  },
+  "required": [
+    "content"
+  ],
+  "additionalProperties": false
+}

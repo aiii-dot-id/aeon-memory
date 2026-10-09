@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "store output",
+  "type": "object",
+  "properties": {
+    "stored": {
+      "type": "boolean",
+      "description": "True when the host remembered the note."
+    },
+    "id": {
+      "type": "string",
+      "description": "The host memory id (m-prefixed)."
+    },
+    "outcome": {
+      "type": "string",
+      "description": "created, reinforced, or updated (supersession)."
+    },
+    "created_at": {
+      "type": "string",
+      "description": "Host-stamped creation time, ms since epoch."
+    },
+    "refused": {
+      "type": "boolean",
+      "description": "True when the host declined the write."
+    },
+    "reasonCode": {
+      "type": "string",
+      "description": "The host's reason for a declined write, or the plugin's for a refused argument (TAGS_NOT_SUPPORTED_ON_HOST_ROUTE, PROJECT_NOT_SUPPORTED_ON_HOST_ROUTE, PINNED_NOT_SUPPORTED_ON_HOST_ROUTE, CONTENT_REQUIRED)."
+    },
+    "detail": {
+      "type": "string"
+    },
+    "migration": {
+      "type": "object",
+      "description": "One-time report from the migration walk (first durable act after upgrade): counts of legacy notes carried into the host record. Absent on every later act."
+    }
+  },
+  "required": [
+    "stored"
+  ]
+}
