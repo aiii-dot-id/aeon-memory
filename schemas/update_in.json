@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "update input",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The note id."
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "description": "New content; omit to keep."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Replacement tags; omit to keep, an empty array clears."
+    },
+    "project": {
+      "type": "string",
+      "description": "Replacement project; omit to keep, an empty string clears."
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}

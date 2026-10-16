@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "evict input",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The note id."
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}
