@@ -1,0 +1,12 @@
+{
+  "name": "store refuses pinned with a named reason",
+  "operation": "store",
+  "arguments": {
+    "content": "pin me",
+    "pinned": true
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}

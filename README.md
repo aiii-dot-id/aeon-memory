@@ -37,6 +37,18 @@ them as unscoped legacy data without inventing historical task context. New
 installs have no such old working set. Schemas in `schemas/` describe all inputs
 and results.
 
+## Tests
+
+Run the regression suite with the SDK version pinned in `go.mod`:
+
+```sh
+go test -race ./...
+```
+
+The suite exercises registered handlers through the SDK frame transport with
+controlled broker fixtures. It covers failure, evidence and storage boundaries;
+it does not replace installed-host or live provider qualification.
+
 ## Build
 
 Requires Go 1.25 or newer, TinyGo 0.42 or newer, and the SDK version pinned in

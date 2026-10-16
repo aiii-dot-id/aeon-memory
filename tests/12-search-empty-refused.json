@@ -1,0 +1,12 @@
+{
+  "name": "search refuses an empty query",
+  "operation": "search",
+  "arguments": {
+    "query": "",
+    "selection": "legacy"
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "search refuses unsupported project scope",
+  "operation": "search",
+  "arguments": {
+    "query": "memory",
+    "project": "example",
+    "selection": "legacy"
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}

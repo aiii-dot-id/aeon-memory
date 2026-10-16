@@ -1,0 +1,11 @@
+{
+  "name": "re-storing the same words reinforces the same memory",
+  "operation": "store",
+  "arguments": {
+    "content": "The ledger is the permanent record; this is the working set."
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"outcome\":\"reinforced\""
+  }
+}

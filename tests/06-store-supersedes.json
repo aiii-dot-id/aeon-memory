@@ -1,0 +1,15 @@
+{
+  "name": "store with supersedes updates the prior memory and reports of",
+  "operation": "store",
+  "arguments": {
+    "content": "The ledger is permanent; the working set is volatile.",
+    "supersedes": "hm_1"
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": [
+      "\"outcome\":\"updated\"",
+      "\"of\":\"hm_1\""
+    ]
+  }
+}
