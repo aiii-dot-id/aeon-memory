@@ -1,15 +1,15 @@
 {
   "id": "id.aeon.memory",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "plugin_family": "tool_bridge",
-  "publisher": "AIII",
+  "publisher": "AI Identity Incorporated",
   "title": "Aeon Working Memory",
-  "description": "A bounded working memory for an AII OS identity over the plugin key-value store, with durable acts routed through the host memory record: store and search delegate to the host's remember and recall (host-stamped provenance, host-decided similarity and meaning), while recent, get, update, evict, stats and health stay plugin-local working-set acts. Reports coverage, eviction state, migration counts and the store's own persistence verdict. Complements the ledger's permanent record.",
+  "description": "Scoped Ring 4 task notes and evidence-linked working lessons through host-backed store and search, with full-text lookup and honest truncation. Explicit legacy operations preserve pre-0.6 integer-ID notes. Notes are evidence to assess, not instructions or identity truth.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/aiii-dot-id/aeon-memory",
   "interface": {
     "id": "id.aeon.memory.core",
-    "version": 4
+    "version": 5
   },
   "capability_envelope": [
     "ring4.kv",
@@ -64,5 +64,6 @@
         "ring4.memory"
       ]
     }
-  ]
+  ],
+  "aiios_min_version": "0.1.19"
 }

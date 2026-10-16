@@ -1,41 +1,157 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "store output",
   "type": "object",
+  "title": "store out",
   "properties": {
     "stored": {
-      "type": "boolean",
-      "description": "True when the host remembered the note."
+      "type": "boolean"
     },
     "id": {
       "type": "string",
-      "description": "The host memory id (m-prefixed)."
+      "description": "Opaque host memory ID, distinct from legacy integer IDs."
     },
     "outcome": {
       "type": "string",
-      "description": "created, reinforced, or updated (supersession)."
+      "enum": [
+        "created",
+        "reinforced",
+        "updated"
+      ]
+    },
+    "of": {
+      "type": "string",
+      "description": "Prior host ID reinforced or superseded."
     },
     "created_at": {
       "type": "string",
-      "description": "Host-stamped creation time, ms since epoch."
+      "description": "Host creation timestamp in RFC3339 form."
+    },
+    "scope": {
+      "type": "string",
+      "description": "Actual host persistence scope."
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "applicability": {
+          "type": "string",
+          "enum": [
+            "task",
+            "project",
+            "reusable",
+            "legacy"
+          ]
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "work_session_id": {
+          "type": "string"
+        },
+        "source_incarnation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "applicability",
+        "project_id",
+        "work_session_id",
+        "source_incarnation"
+      ],
+      "additionalProperties": false,
+      "description": "Host-derived applicability and source context; legacy is explicitly unscoped."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Existing interaction record ID.",
+            "minLength": 1
+          },
+          "sequence": {
+            "type": "string",
+            "description": "Positive canonical decimal record sequence, encoded as a string.",
+            "pattern": "^[1-9][0-9]*$",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Digest binding the cited record.",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "incarnation": {
+            "type": "string",
+            "description": "Source incarnation of the cited record.",
+            "minLength": 1
+          },
+          "availability": {
+            "type": "string",
+            "description": "Current retained evidence availability. This is not a correctness verdict and does not return the payload.",
+            "enum": [
+              "available",
+              "unavailable",
+              "changed"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "sha256",
+          "incarnation"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 16
     },
     "refused": {
-      "type": "boolean",
-      "description": "True when the host declined the write."
+      "type": "boolean"
     },
     "reasonCode": {
       "type": "string",
-      "description": "The host's reason for a declined write, or the plugin's for a refused argument (TAGS_NOT_SUPPORTED_ON_HOST_ROUTE, PROJECT_NOT_SUPPORTED_ON_HOST_ROUTE, PINNED_NOT_SUPPORTED_ON_HOST_ROUTE, CONTENT_REQUIRED)."
+      "description": "Typed host refusal code; stored=false never means saved."
     },
     "detail": {
       "type": "string"
     },
     "migration": {
       "type": "object",
-      "description": "One-time report from the migration walk (first durable act after upgrade): counts of legacy notes carried into the host record. Absent on every later act."
+      "properties": {
+        "migrated": {
+          "type": "boolean"
+        },
+        "created": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reinforced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "migrated",
+        "created",
+        "reinforced",
+        "updated",
+        "skipped"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
     "stored"
-  ]
+  ],
+  "additionalProperties": false
 }

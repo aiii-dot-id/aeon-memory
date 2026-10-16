@@ -1,0 +1,11 @@
+{
+  "name": "store refuses empty content",
+  "operation": "store",
+  "arguments": {
+    "content": ""
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}

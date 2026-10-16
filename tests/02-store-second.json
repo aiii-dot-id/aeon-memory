@@ -1,0 +1,11 @@
+{
+  "name": "a second distinct note is created and no migration block repeats",
+  "operation": "store",
+  "arguments": {
+    "content": "Search reports how many notes it matched."
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"outcome\":\"created\""
+  }
+}
