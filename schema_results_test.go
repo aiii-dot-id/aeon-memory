@@ -13,8 +13,6 @@ import (
 	"unicode/utf8"
 )
 
-// Validate actual facade replies against the shipped closed-subset schemas.
-// This is test-only structural checking; the real host remains authoritative.
 func checkFacadeSchema(t *testing.T, operation string, value any) {
 	t.Helper()
 	raw, e := os.ReadFile("schemas/" + operation + "_out.json")

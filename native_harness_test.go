@@ -18,8 +18,6 @@ import (
 	sdk "github.com/aiii-dot-id/aii-plugin-sdk/pkg/aiiosdk"
 )
 
-// The child runs the real registered handlers over the SDK's public native
-// transport. Only the broker is fake; SDK internals are not patched.
 func TestNativeHarnessChild(t *testing.T) {
 	if os.Getenv("MEMORY_TEST_CHILD") != "1" {
 		return
@@ -34,7 +32,7 @@ func TestNativeHarnessChild(t *testing.T) {
 		os.Exit(2)
 	}
 	fmt.Fprintln(os.Stderr, "CHILD_SERVE_OK")
-	os.Exit(0) // testing's PASS line must not enter the framed stream.
+	os.Exit(0)
 }
 
 func respondNative(t *testing.T, host func([]byte) ([]byte, error), frame []byte) []byte {

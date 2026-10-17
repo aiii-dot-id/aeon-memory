@@ -11,6 +11,12 @@ func TestOrdinaryMemorySurfacePreservesLegacyAccess(t *testing.T) {
 	p := newMemoryPlugin()
 	want := map[string]bool{"store": true, "search": true, "recent": false, "get": false, "update": false, "recall": false, "evict": false, "stats": false, "health": false}
 	for _, d := range p.Descriptors() {
+		if d.ID == "context" {
+			if !d.Context || d.Primary || d.Effects != "read.internal" {
+				t.Fatal("context must be a host-only read")
+			}
+			continue
+		}
 		primary, ok := want[d.ID]
 		if !ok {
 			t.Fatalf("unexpected operation %q", d.ID)

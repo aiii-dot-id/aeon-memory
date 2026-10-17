@@ -1,13 +1,5 @@
 package main
 
-// case_replay_test.go - replays the qualification cases in tests/
-// through the native harness (fakeKV answering the memory verbs) so
-// the case suite is checked by CI's native job too, not only by the
-// worker-oracle stage that needs the wasm toolchain. The fake models
-// the broker's documented rules (supersedes mints a new id, identical
-// text reinforces). Where the kit's stand-in host and this fake
-// differ, the cases assert only what both answer identically.
-
 import (
 	"encoding/json"
 	"os"

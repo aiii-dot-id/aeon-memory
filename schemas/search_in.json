@@ -19,7 +19,7 @@
     },
     "selection": {
       "type": "string",
-      "description": "Relevant combines current-task, explicit project-wide and reusable notes. Legacy selects unscoped compatibility notes. The host derives project/task; callers cannot supply their identifiers.",
+      "description": "Relevant combines current-task, explicit project-wide and reusable notes using the host-derived acting work session. Without that session it searches reusable notes only; a selected UI project is not sufficient. Legacy selects unscoped compatibility notes. Read selection_context in the result for the actual scope.",
       "enum": [
         "relevant",
         "task",

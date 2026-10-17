@@ -66,7 +66,7 @@ func TestMemoryDefaultApplicabilityUsesOnlyHostSession(t *testing.T) {
 			}
 		})
 	}
-	// Host injection stripping itself is qualified in the host, not by this guest fixture.
+
 }
 
 func TestMemoryReferencesAndCorrectionAreForwardedWithoutPayload(t *testing.T) {

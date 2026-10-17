@@ -219,10 +219,14 @@
     "result_budget_bytes": {
       "type": "integer",
       "description": "Encoded result limit: 61440 for query/recent, 262144 for complete by-ID detail.",
-      "enum": [61440, 262144]
+      "enum": [
+        61440,
+        262144
+      ]
     },
     "status": {
-      "type": "string"
+      "type": "string",
+      "description": "Host lookup outcome. found_nothing is scoped to this request; it does not establish that all memories are empty."
     },
     "policy": {
       "type": "string"
@@ -258,6 +262,33 @@
         "basis"
       ],
       "additionalProperties": false
+    },
+    "selection_context": {
+      "type": "object",
+      "description": "Host-reported selection and exact scope operands used by this read, including an empty result. Omitted when an older host does not provide it; never inferred from the caller or UI project. relevant with reason=no_session and no IDs searches reusable notes only.",
+      "properties": {
+        "selection": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "work_session_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Host-reported no_session explains relevant selection without an acting work session; other successful selections omit it."
+        }
+      },
+      "required": [
+        "selection"
+      ],
+      "additionalProperties": false
+    },
+    "empty_result": {
+      "type": "string",
+      "description": "Present for found_nothing with zero matched/shown notes. Explains that absence is limited to this request and selected plugin scope."
     }
   },
   "required": [

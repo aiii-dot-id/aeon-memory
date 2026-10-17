@@ -249,6 +249,23 @@ func recallResult(rr sdk.RecallResult, selection string, byID bool) (map[string]
 		budget = memoryDetailBudget
 	}
 	out := map[string]any{"results": hits, "count": len(hits), "matched": rr.Matched, "shown": len(hits), "truncated": rr.Truncated || cut, "text_truncated": cut, "text_bytes": memoryTextBudget - remaining, "text_budget_bytes": memoryTextBudget, "result_truncated": false, "result_budget_bytes": budget, "status": rr.Status, "policy": rr.Policy, "selection": selection}
+	if rr.SelectionContext != nil {
+		scope := rr.SelectionContext
+		context := map[string]any{"selection": scope.Selection}
+		if scope.ProjectID != "" {
+			context["project_id"] = scope.ProjectID
+		}
+		if scope.WorkSessionID != "" {
+			context["work_session_id"] = scope.WorkSessionID
+		}
+		if scope.Reason != "" {
+			context["reason"] = scope.Reason
+		}
+		out["selection_context"] = context
+	}
+	if rr.Status == "found_nothing" && rr.Matched == 0 && rr.Shown == 0 {
+		out["empty_result"] = "No notes matched this request in this plugin's selected host-memory scope. Other projects, selections, core memory or the legacy KV working set may contain notes. Store only a useful finding supported by actual work; no placeholder note is needed."
+	}
 	if cut && rr.Status == "found" {
 		out["status"] = "partial"
 	}

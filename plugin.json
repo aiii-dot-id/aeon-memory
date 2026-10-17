@@ -1,6 +1,6 @@
 {
   "id": "id.aeon.memory",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "plugin_family": "tool_bridge",
   "publisher": "AI Identity Incorporated",
   "title": "Aeon Working Memory",
@@ -65,5 +65,5 @@
       ]
     }
   ],
-  "aiios_min_version": "0.1.19"
+  "aiios_min_version": "0.1.20"
 }

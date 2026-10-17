@@ -17,36 +17,27 @@ import (
 	sdk "github.com/aiii-dot-id/aii-plugin-sdk/pkg/aiiosdk"
 )
 
-// ─── A fake store ─────────────────────────────────────────────────
-
-// fakeKV plays the host's key-value broker over the SDK's native
-// transport: an in-memory map answering kv.put, kv.get and kv.delete
-// exactly as the broker would, with failure injection for the paths
-// the tests must reach (a refused put, a refused delete, a key
-// ceiling) and a scope verdict of its own.
 type fakeKV struct {
-	memoryCalls []map[string]any // captured broker arguments; not a host authority model
+	memoryCalls []map[string]any
 
 	store map[string]string
 	clock int64
 
-	failNextPut  *map[string]any // the next matching kv.put answers this instead of storing
-	failPutKey   string          // when set, only a put of this key fails
+	failNextPut  *map[string]any
+	failPutKey   string
 	failedPutKey string
 
-	failNextDelete *map[string]any // the next kv.delete answers this instead of deleting
-	failDeleteKey  string          // when set, every kv.delete of this key fails until cleared
-	maxKeys        int             // 0 = unlimited; otherwise a put of a NEW key beyond it is refused
-	scope          string          // reported on every put; default "persistent"
+	failNextDelete *map[string]any
+	failDeleteKey  string
+	maxKeys        int
+	scope          string
 
-	// memory.* (0.6.0): the host's memory instruments, faked at broker shape
-	failNextRemember *map[string]any // the next memory.remember answers this instead of creating
-	failNextRecall   *map[string]any // the next memory.recall answers this instead of searching
-	mClock           int             // mint counter for deterministic ids: m0, m1, ...
+	failNextRemember *map[string]any
+	failNextRecall   *map[string]any
+	mClock           int
 	memories         []fakeMemory
 }
 
-// fakeMemory is one host-side record as the fake broker holds it.
 type fakeMemory struct {
 	ID           string
 	Text         string
@@ -56,9 +47,6 @@ type fakeMemory struct {
 	Created      time.Time
 }
 
-// fakeMemoryWords and fakeMemoryNormal mirror the stand-in host's
-// normalization (cmd/aiisdk/harness_memory.go): letters and digits
-// lowercased, everything else a separator.
 func fakeMemoryWords(text string) map[string]bool {
 	out := map[string]bool{}
 	var cur strings.Builder
@@ -89,7 +77,6 @@ func fakeMemoryNormal(text string) string {
 	return strings.Join(keys, " ")
 }
 
-// fakeHarnessMeaning is the stand-in's meaning disclosure, mirrored.
 var fakeHarnessMeaning = map[string]any{
 	"status": "source_unavailable", "basis": "",
 	"detail": "the harness has no embeddings model; words and substrings answered",
@@ -182,7 +169,6 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 			"operation_result": map[string]any{"deleted": found},
 		})
 
-	// ─── memory.* (0.6.0: the host's memory instruments, broker shapes)
 	case "memory.remember":
 		text, _ := obj.Object("arguments").String("text")
 		if f.failNextRemember != nil {
@@ -190,10 +176,7 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 			f.failNextRemember = nil
 			return json.Marshal(fail)
 		}
-		// Mirrors cmd/aiisdk/harness_memory.go, the stand-in the
-		// qualification harness runs: hm_N ids, supersedes requires a
-		// current memory (MEMORY_NOT_FOUND otherwise), normalized-word
-		// reinforce, created/updated carry the new memory's stamp.
+
 		sup, _ := obj.Object("arguments").String("supersedes")
 		if strings.TrimSpace(text) == "" {
 			return json.Marshal(map[string]any{
@@ -232,8 +215,7 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 				},
 			})
 		}
-		// Mirrors the stand-in: reinforce is normalized-words equality
-		// (same word set, any order/case), not exact text.
+
 		normal := fakeMemoryNormal(text)
 		for i := range f.memories {
 			if f.memories[i].SupersededBy == "" && fakeMemoryNormal(f.memories[i].Text) == normal {
@@ -274,9 +256,7 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 		query, _ := obj.Object("arguments").String("query")
 		idArg, _ := obj.Object("arguments").String("id")
 		recent, _ := obj.Object("arguments").Bool("recent")
-		// Mirrors the stand-in: currentMemory finds any id (superseded
-		// included), id hits carry policy none, truncated false, the
-		// meaning disclosure, and reinforce the memory (accesses++).
+
 		if idArg != "" {
 			for i := range f.memories {
 				if f.memories[i].ID != idArg {
@@ -395,11 +375,6 @@ func (f *fakeKV) host(params []byte) ([]byte, error) {
 	return nil, fmt.Errorf("fake host: unknown operation: %s", op)
 }
 
-// ─── Harness ──────────────────────────────────────────────────────
-
-// call sends one invoke.call through the real handlers with the fake
-// store and the host's injected clock, and returns the whole result
-// envelope: status, reason, operation_result.
 func call(t *testing.T, fkv *fakeKV, operation string, args map[string]any, hostContext ...map[string]any) map[string]any {
 	t.Helper()
 	if args == nil {
@@ -436,8 +411,6 @@ func call(t *testing.T, fkv *fakeKV, operation string, args map[string]any, host
 	return result
 }
 
-// invoke is call for the success path: it fails the test on any
-// status but succeeded and returns the operation_result.
 func invoke(t *testing.T, fkv *fakeKV, operation string, args map[string]any, hostContext ...map[string]any) map[string]any {
 	t.Helper()
 	result := call(t, fkv, operation, args, hostContext...)
@@ -451,8 +424,6 @@ func invoke(t *testing.T, fkv *fakeKV, operation string, args map[string]any, ho
 	return or
 }
 
-// refused is call for the argument-error path: it asserts a failed
-// status with an argument reason code.
 func refused(t *testing.T, fkv *fakeKV, operation string, args map[string]any) {
 	t.Helper()
 	result := call(t, fkv, operation, args)
@@ -467,9 +438,7 @@ func refused(t *testing.T, fkv *fakeKV, operation string, args map[string]any) {
 
 func fill(t *testing.T, fkv *fakeKV, n int, prefix string) {
 	t.Helper()
-	// 0.6.0: store is host-routed, so seeding goes direct to KV —
-	// this stands in for a pre-0.6.0 history, exactly what these
-	// working-set tests exercise.
+
 	for i := 1; i <= n; i++ {
 		seedNote(t, fkv, int64(i), fmt.Sprintf("%s %d", prefix, i-1))
 	}
@@ -484,7 +453,6 @@ func editMeta(t *testing.T, fkv *fakeKV, old, new string) {
 	fkv.store["meta"] = strings.Replace(raw, old, new, 1)
 }
 
-// editNote patches a note body in place, the note-side twin of editMeta.
 func editNote(t *testing.T, fkv *fakeKV, id int64, old, new string) {
 	t.Helper()
 	key := noteKeyPfx + strconv.FormatInt(id, 10)
@@ -495,11 +463,6 @@ func editNote(t *testing.T, fkv *fakeKV, id int64, old, new string) {
 	fkv.store[key] = strings.Replace(raw, old, new, 1)
 }
 
-// ─── 0.6.0: host-routed store and search ─────────────────────────
-
-// seedNote writes one legacy KV note exactly as the plugin's own
-// pre-0.6.0 writer did: note key, index head, meta. Tests use it to
-// stand in for a 0.5.x history the migration walk then carries.
 func seedNote(t *testing.T, fkv *fakeKV, id int64, content string) {
 	t.Helper()
 	tags := ""
@@ -524,8 +487,7 @@ func seedNote(t *testing.T, fkv *fakeKV, id int64, content string) {
 	for _, p := range strings.Fields(recent) {
 		parts = append(parts, p)
 	}
-	// Faithful to the 0.5.x writer: a stored note enters at the FRONT
-	// of the recency order (most recently used first).
+
 	parts = append([]string{strconv.FormatInt(id, 10)}, parts...)
 	m["recent"] = strings.Join(parts, " ")
 	if _, ok := m["zombieq"]; !ok {
@@ -541,11 +503,6 @@ func seedNote(t *testing.T, fkv *fakeKV, id int64, content string) {
 	fkv.clock++
 }
 
-// seedNoteFull writes one legacy KV note with tags and project —
-// the shape the pre-0.6.0 writer produced for tagged/projected
-// notes. seedNote establishes the record (note key, index head,
-// next_id, clock); this overwrites the note body with the full
-// field set so the working-set verbs see tags/project as stored.
 func seedNoteFull(t *testing.T, fkv *fakeKV, id int64, content string, tags []string, project string) {
 	t.Helper()
 	seedNote(t, fkv, id, content)
@@ -589,10 +546,10 @@ func TestStoreIsHostRouted(t *testing.T) {
 	if len(fkv.memories) != 1 {
 		t.Fatalf("the host record holds %d memories, want 1", len(fkv.memories))
 	}
-	if len(fkv.store) != 1 { // meta only — no KV note written
+	if len(fkv.store) != 1 {
 		t.Fatalf("store wrote KV keys: %v", fkv.store)
 	}
-	// A second store of identical text reinforces rather than creates.
+
 	r2 := invoke(t, fkv, "store", map[string]any{"content": "first host-routed note"})
 	if r2["outcome"] != "reinforced" {
 		t.Fatalf("second identical store outcome = %v, want reinforced", r2["outcome"])
@@ -654,7 +611,7 @@ func TestStoreSupersedes(t *testing.T) {
 	if id1 == "" {
 		t.Fatalf("no host id: %v", r1)
 	}
-	// Correct it through the facade's supersedes passthrough.
+
 	r2 := invoke(t, fkv, "store", map[string]any{
 		"content":    "corrected claim",
 		"supersedes": id1,
@@ -676,9 +633,6 @@ func TestSearchIsHostRouted(t *testing.T) {
 	fkv.clock += 1000
 	seedNote(t, fkv, 2, "beta note about rivers")
 
-	// 0.6.3 boundary: search is a pure read.internal verb. Before the
-	// first store, the legacy KV set is NOT visible to search —
-	// migration rides store (the write verb), not search.
 	res := invoke(t, fkv, "search", map[string]any{"selection": "legacy", "query": "gardens"})
 	if res["status"] != "found_nothing" {
 		t.Fatalf("pre-store status = %v, want found_nothing", res["status"])
@@ -691,8 +645,6 @@ func TestSearchIsHostRouted(t *testing.T) {
 		t.Fatalf("pre-store meaning disclosure missing: %v", res)
 	}
 
-	// First store carries the legacy notes in: the walk runs on the
-	// write verb and its report rides store's reply.
 	st := invoke(t, fkv, "store", map[string]any{"content": "gamma note about deltas"})
 	if st["stored"] != true {
 		t.Fatalf("store = %v", st)
@@ -705,8 +657,6 @@ func TestSearchIsHostRouted(t *testing.T) {
 		t.Fatalf("store's migration report = %v", mig)
 	}
 
-	// After the store, search sees the host record — carried notes
-	// included — and never carries a migration block of its own.
 	res2 := invoke(t, fkv, "search", map[string]any{"selection": "legacy", "query": "gardens"})
 	if res2["status"] != "found" {
 		t.Fatalf("post-store status = %v", res2["status"])
@@ -764,10 +714,10 @@ func TestMigrationWalkCarriesAndReports(t *testing.T) {
 	if mig["skipped"] != float64(0) {
 		t.Fatalf("skipped = %v", mig["skipped"])
 	}
-	if len(fkv.memories) != 4 { // 3 legacy + 1 fresh
+	if len(fkv.memories) != 4 {
 		t.Fatalf("memories = %d, want 4", len(fkv.memories))
 	}
-	// Done is done: a second act carries no block.
+
 	res2 := invoke(t, fkv, "store", map[string]any{"content": "a second fresh note"})
 	if _, has := res2["migration"]; has {
 		t.Fatalf("second act carried a migration block: %v", res2)
@@ -781,14 +731,13 @@ func TestStatsReportsHostCounters(t *testing.T) {
 	fkv := newFakeKV()
 	seedNote(t, fkv, 1, "legacy note one")
 	seedNote(t, fkv, 2, "legacy note two")
-	// Before the walk: the split is visible — KV holds two, host zero.
+
 	if s := invoke(t, fkv, "stats", map[string]any{}); s["host_created"] != float64(0) {
 		t.Fatalf("host_created before the walk = %v, want 0", s["host_created"])
 	}
-	// The first host-routed act runs the walk.
+
 	invoke(t, fkv, "store", map[string]any{"content": "a fresh host-routed note"})
-	// After: the walk carried two, and the triggering store created
-	// its own — host_created counts both (live acts, not just the walk).
+
 	s2 := invoke(t, fkv, "stats", map[string]any{})
 	if s2["host_created"] != float64(3) {
 		t.Fatalf("host_created = %v, want 3 (2 carried + 1 live store)", s2["host_created"])
@@ -801,8 +750,7 @@ func TestStatsReportsHostCounters(t *testing.T) {
 func TestMigrationAbortsWhenReadbackFails(t *testing.T) {
 	fkv := newFakeKV()
 	seedNote(t, fkv, 1, "a legacy note whose landing cannot be read back")
-	// The fake recall refuses by-id reads: the walk's verification
-	// step cannot confirm the landing and must abort the walk.
+
 	fail := map[string]any{
 		"status":     "failed",
 		"reason":     "injected recall failure",
@@ -817,8 +765,6 @@ func TestMigrationAbortsWhenReadbackFails(t *testing.T) {
 		t.Fatalf("memories = %d, want 1 (the walk aborted after the landing)", len(fkv.memories))
 	}
 }
-
-// ─── Store, search, recent ────────────────────────────────────────
 
 func TestStoreAndRecent(t *testing.T) {
 	fkv := newFakeKV()
@@ -839,11 +785,7 @@ func TestStoreAndRecent(t *testing.T) {
 
 func TestStoreAndSearch(t *testing.T) {
 	fkv := newFakeKV()
-	// 0.6.3: search is host-routed and read.internal; migration rides
-	// store. The first store carries the legacy notes in, and only
-	// then do retrieval assertions run against the host record.
-	// project scoping itself is a legacy-KV feature, tested where it
-	// lives (recent, update).
+
 	seedNoteFull(t, fkv, 1, "Reading the plugin framework design docs", []string{"plugin", "design"}, "memory-plugin")
 	seedNoteFull(t, fkv, 2, "Writing the working memory plugin code", []string{"plugin", "code"}, "memory-plugin")
 	seedNoteFull(t, fkv, 3, "Researching memory systems", []string{"research", "memory"}, "research")
@@ -864,10 +806,7 @@ func TestStoreAndSearch(t *testing.T) {
 	}
 
 	res3 := invoke(t, fkv, "search", map[string]any{"selection": "legacy", "query": "memory systems"})
-	// broker-family all-words matching: only the note carrying every
-	// term answers — note 2 has "memory" but not "systems", so it is
-	// excluded; matching is whole-word, so "research" alone would not
-	// reach "Researching" either (the old KV engine's OR is retired)
+
 	if res3["count"] != float64(1) {
 		t.Fatalf("two-term results = %v, want 1 under all-words matching", res3["count"])
 	}
@@ -907,14 +846,10 @@ func TestSearchCoversTheWholeStoreAtCapacity(t *testing.T) {
 
 func TestSearchSortsByScoreThenNewest(t *testing.T) {
 	fkv := newFakeKV()
-	// 0.6.0: ranking is host-decided (rank + decay, carrd policy);
-	// the fake host models exact-words matching only, so this test
-	// asserts the honest subset: both notes reachable, the facade's
-	// passthrough fields present.
+
 	seedNote(t, fkv, 1, "alpha is here")
 	seedNote(t, fkv, 2, "alpha appears")
-	// 0.6.3: migration rides store, not search — trigger the carry-in
-	// before retrieval assertions.
+
 	invoke(t, fkv, "store", map[string]any{"content": "carry-in trigger for the migration walk"})
 	res := invoke(t, fkv, "search", map[string]any{"selection": "legacy", "query": "alpha"})
 	results := res["results"].([]any)
@@ -956,8 +891,6 @@ func TestProjectScoping(t *testing.T) {
 	}
 }
 
-// ─── Get, update, recall, evict ───────────────────────────────────
-
 func TestGet(t *testing.T) {
 	fkv := newFakeKV()
 	seedNoteFull(t, fkv, 1, "A test note for retrieval", []string{"test"}, "")
@@ -998,9 +931,7 @@ func TestEvict(t *testing.T) {
 	if len(notes) != 1 || notes[0].(map[string]any)["id"] != float64(2) {
 		t.Fatalf("recent after evict = %v", notes)
 	}
-	// 0.6.0: an evicted legacy note never reaches the host record —
-	// the migration walk skips evicted notes, so host search cannot
-	// find what KV never carried in.
+
 	if res := invoke(t, fkv, "search", map[string]any{"selection": "legacy", "query": "evicted"}); res["matched"] != float64(0) {
 		t.Fatalf("search matched an evicted note: %v", res)
 	}
@@ -1043,9 +974,6 @@ func TestUpdate(t *testing.T) {
 		t.Fatalf("tags after clearing = %v", tags)
 	}
 
-	// 0.6.3: update is a KV verb; the host record learns a legacy
-	// note's current content only through a store-time carry-in. So
-	// the revised content is invisible to search until then.
 	if s := invoke(t, fkv, "search", map[string]any{"selection": "legacy", "query": "revised"}); s["status"] != "found_nothing" {
 		t.Fatalf("pre-carry-in search for revised content = %v, want found_nothing", s)
 	}
@@ -1088,7 +1016,6 @@ func TestRecall(t *testing.T) {
 	}
 	refused(t, fkv, "recall", map[string]any{})
 
-	// A pure read: recall does not touch the recency order.
 	invoke(t, fkv, "recall", map[string]any{"before_ms": mid})
 	rec := invoke(t, fkv, "recent", map[string]any{"limit": 1})
 	if rec["notes"].([]any)[0].(map[string]any)["id"] != float64(3) {
@@ -1111,8 +1038,6 @@ func TestTouchOnRetrieval(t *testing.T) {
 	}
 }
 
-// ─── Arguments ────────────────────────────────────────────────────
-
 func TestEmptyContentIsRefused(t *testing.T) {
 	fkv := newFakeKV()
 	refused(t, fkv, "store", map[string]any{"content": ""})
@@ -1121,9 +1046,7 @@ func TestEmptyContentIsRefused(t *testing.T) {
 
 func TestTagsAreValidated(t *testing.T) {
 	fkv := newFakeKV()
-	// 0.6.0: store is host-routed and refuses tags outright (no
-	// silent no-ops on the facade); tag validation itself lives on
-	// update, the remaining tags-capable writer.
+
 	refused(t, fkv, "store", map[string]any{"content": "an empty array is fine", "tags": []string{}})
 	seedNoteFull(t, fkv, 1, "an empty array is fine", []string{}, "")
 	r := invoke(t, fkv, "update", map[string]any{"id": 1, "tags": []string{"ok-tag"}})
@@ -1165,15 +1088,12 @@ func TestContentWithUnicode(t *testing.T) {
 	if g := invoke(t, fkv, "get", map[string]any{"id": 1}); g["content"] != content {
 		t.Fatalf("content round-trip: got %q", g["content"])
 	}
-	// 0.6.3: migration rides store — trigger the carry-in before the
-	// host-side unicode assertion.
+
 	invoke(t, fkv, "store", map[string]any{"content": "carry-in trigger for the migration walk"})
 	if res := invoke(t, fkv, "search", map[string]any{"selection": "legacy", "query": "日本語"}); res["matched"] != float64(1) {
 		t.Fatalf("unicode search = %v", res)
 	}
 }
-
-// ─── Capacity, reclaim, displacement ──────────────────────────────
 
 func TestStats(t *testing.T) {
 	fkv := newFakeKV()
@@ -1217,10 +1137,7 @@ func TestScopeVerdictIsReported(t *testing.T) {
 	if s := invoke(t, fkv, "stats", map[string]any{}); s["kv_scope"] != "unknown" {
 		t.Fatalf("before any put, kv_scope = %v, want unknown", s["kv_scope"])
 	}
-	// 0.6.0: store never writes KV, so the scope probe is update —
-	// the plugin's remaining writer. seedNote populates the store map
-	// directly (no kv.put), so a seeded set records no scope; the
-	// verdict shows through the first real write.
+
 	seedNote(t, fkv, 1, "legacy note")
 	fkv.scope = "temp"
 	invoke(t, fkv, "update", map[string]any{"id": 1, "content": "revised under the temp scope"})
@@ -1233,8 +1150,6 @@ func TestScopeVerdictIsReported(t *testing.T) {
 		t.Fatalf("kv_scope = %v, want persistent", s["kv_scope"])
 	}
 }
-
-// ─── Health ───────────────────────────────────────────────────────
 
 func TestHealthDropsStaleIndexEntries(t *testing.T) {
 	fkv := newFakeKV()
@@ -1270,7 +1185,7 @@ func TestHealthRequeuesAnEvictedNoteTheQueueLost(t *testing.T) {
 	fkv := newFakeKV()
 	fill(t, fkv, 3, "note")
 	invoke(t, fkv, "evict", map[string]any{"id": 1})
-	// The residue of a crash between the note write and the queue write.
+
 	editMeta(t, fkv, `"zombieq":"1"`, `"zombieq":""`)
 	if s := invoke(t, fkv, "stats", map[string]any{}); s["zombieq"] != float64(0) || s["evicted"] != float64(1) {
 		t.Fatalf("setup: %v", s)
@@ -1303,8 +1218,6 @@ func TestHealthDropsALivingNoteFromTheQueue(t *testing.T) {
 		t.Fatalf("second health = %v", h2)
 	}
 }
-
-// ─── Denials ──────────────────────────────────────────────────────
 
 func TestADeniedHostCallStaysOnTheErrorChannel(t *testing.T) {
 	denyHost := func(params []byte) ([]byte, error) {
@@ -1340,12 +1253,6 @@ func TestADeniedHostCallStaysOnTheErrorChannel(t *testing.T) {
 	}
 }
 
-// ─── Schemas ──────────────────────────────────────────────────────
-
-// The host compiles schemas in a closed subset of JSON Schema and
-// refuses a package whose schemas use anything else, at activation and
-// after verification has passed. Every shipped schema is held to that
-// subset here so a package can never be built dead on arrival.
 func TestSchemasStayInTheHostsClosedSubset(t *testing.T) {
 	allowed := map[string]bool{
 		"$schema": true, "$id": true,
@@ -1409,10 +1316,8 @@ func TestSchemasStayInTheHostsClosedSubset(t *testing.T) {
 	}
 }
 
-// Every operation the module registers ships both of its schemas, and
-// no schema ships without an operation.
 func TestEveryOperationShipsItsSchemas(t *testing.T) {
-	ops := []string{"store", "search", "recent", "get", "update", "recall", "evict", "stats", "health"}
+	ops := newMemoryPlugin().Operations()
 	want := map[string]bool{}
 	for _, op := range ops {
 		want[op+"_in.json"] = true
@@ -1432,8 +1337,6 @@ func TestEveryOperationShipsItsSchemas(t *testing.T) {
 		t.Errorf("schemas/%s is missing", name)
 	}
 }
-
-/* ─── Pinned and oldest-mode (0.5.1) ─────────────────────────────── */
 
 func equalIDs(a, b []int64) bool {
 	if len(a) != len(b) {
@@ -1480,12 +1383,10 @@ func TestRecentOldestMode(t *testing.T) {
 	refused(t, fkv, "recent", map[string]any{"mode": "invalid"})
 }
 
-/* stats counts pinned notes separately from alive. */
 func TestStatsReportsPinned(t *testing.T) {
 	fkv := newFakeKV()
 	fill(t, fkv, 3, "note")
-	// 0.6.0: pinned stores are refused on the host-routed path, so the
-	// pinned note is seeded as 0.5.x history and patched to pinned.
+
 	seedNote(t, fkv, 4, "pinned note")
 	editNote(t, fkv, 4, `"pinned":false`, `"pinned":true`)
 
@@ -1498,18 +1399,10 @@ func TestStatsReportsPinned(t *testing.T) {
 	}
 }
 
-/*
-	Eviction is a pinned note's only exit: an evicted pinned note stays
-
-readable by id and leaves search and recent. 0.6.0: store never writes
-KV, so occupancy is frozen below capacity and the reclaim-at-capacity
-tail is retired contract — the pin shield now guards only evict.
-*/
 func TestEvictExitsPinned(t *testing.T) {
 	fkv := newFakeKV()
 	fill(t, fkv, maxNotes-1, "note")
-	// 0.6.0: pinned stores are refused on the host-routed path, so the
-	// pinned note is seeded as 0.5.x history and patched to pinned.
+
 	seedNote(t, fkv, int64(maxNotes), "pinned and then evicted")
 	editNote(t, fkv, int64(maxNotes), `"pinned":false`, `"pinned":true`)
 	pinnedID := float64(maxNotes)
@@ -1523,11 +1416,6 @@ func TestEvictExitsPinned(t *testing.T) {
 		t.Fatalf("soft-evicted pinned note not readable by id: %v", g)
 	}
 
-	// 0.6.0 retired contract: store no longer displaces at capacity
-	// (occupancy is frozen below it), so the reclaim receipt is gone.
-	// What survives of the tail: the evicted note is out of the living
-	// set. recent clamps at maxLimit, so count is the clamp over the
-	// living set — the evicted head must be skipped, not clamped away.
 	r := invoke(t, fkv, "recent", map[string]any{"limit": maxNotes})
 	if r["count"] != float64(maxLimit) {
 		t.Fatalf("recent count = %v, want the %d-note clamp over %d living notes", r["count"], maxLimit, maxNotes-1)
@@ -1547,7 +1435,6 @@ func TestEvictExitsPinned(t *testing.T) {
 	}
 }
 
-// Unsupported project filters must fail before any host recall/reinforcement.
 func TestSearchRefusesProjectWithoutRecalling(t *testing.T) {
 	for _, project := range []string{"alpha", ""} {
 		t.Run(project, func(t *testing.T) {
