@@ -1,0 +1,16 @@
+{
+  "name": "Enumerate legacy host notes through ordinary search",
+  "operation": "search",
+  "arguments": {
+    "recent": true,
+    "selection": "legacy",
+    "limit": 5
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": [
+      "\"selection\":\"legacy\"",
+      "\"text_truncated\":false"
+    ]
+  }
+}

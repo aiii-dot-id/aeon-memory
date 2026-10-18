@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "store in",
+  "properties": {
+    "content": {
+      "type": "string",
+      "description": "Complete note with conditions, result and caveats. Maximum16384 UTF-8 bytes, enforced at runtime.",
+      "minLength": 1,
+      "maxLength": 16384
+    },
+    "applicability": {
+      "type": "string",
+      "description": "Omitted: current trusted task when present, otherwise unscoped legacy. Explicit task/project require corresponding acting context. Reusable remains private to this identity and plugin.",
+      "enum": [
+        "task",
+        "project",
+        "reusable",
+        "legacy"
+      ]
+    },
+    "supersedes": {
+      "type": "string",
+      "description": "Current host memory ID to correct within the same applicability. A stale or foreign target is refused.",
+      "minLength": 1
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Existing interaction record ID.",
+            "minLength": 1
+          },
+          "sequence": {
+            "type": "string",
+            "description": "Positive canonical decimal record sequence, encoded as a string.",
+            "pattern": "^[1-9][0-9]*$",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Digest binding the cited record.",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "incarnation": {
+            "type": "string",
+            "description": "Source incarnation of the cited record.",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "sha256",
+          "incarnation"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 16
+    }
+  },
+  "required": [
+    "content"
+  ],
+  "additionalProperties": false
+}

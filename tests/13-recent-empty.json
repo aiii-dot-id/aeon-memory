@@ -1,0 +1,11 @@
+{
+  "name": "recent reports the working set is empty on a fresh record",
+  "operation": "recent",
+  "arguments": {
+    "limit": 5
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": "\"count\":0"
+  }
+}

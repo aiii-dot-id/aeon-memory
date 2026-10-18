@@ -1,0 +1,12 @@
+{
+  "name": "Refuse ambiguous selectors",
+  "operation": "search",
+  "arguments": {
+    "query": "note",
+    "recent": true
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}

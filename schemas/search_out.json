@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "search out",
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Opaque host memory ID."
+          },
+          "text": {
+            "type": "string",
+            "description": "Complete note when text_truncated=false; empty if its body was omitted from the combined text budget."
+          },
+          "text_truncated": {
+            "type": "boolean"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "Host excerpt, never a substitute for the complete text."
+          },
+          "match": {
+            "type": "string"
+          },
+          "similarity": {
+            "type": "number"
+          },
+          "score": {
+            "type": "number"
+          },
+          "strength": {
+            "type": "number"
+          },
+          "time": {
+            "type": "string",
+            "description": "Host RFC3339 timestamp."
+          },
+          "accesses": {
+            "type": "integer"
+          },
+          "attribution": {
+            "type": "string"
+          },
+          "ring": {
+            "type": "integer"
+          },
+          "class": {
+            "type": "string"
+          },
+          "superseded_by": {
+            "type": "string",
+            "description": "Replacement host ID, empty when current."
+          },
+          "context": {
+            "type": "object",
+            "properties": {
+              "applicability": {
+                "type": "string",
+                "enum": [
+                  "task",
+                  "project",
+                  "reusable",
+                  "legacy"
+                ]
+              },
+              "project_id": {
+                "type": "string"
+              },
+              "work_session_id": {
+                "type": "string"
+              },
+              "source_incarnation": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "applicability",
+              "project_id",
+              "work_session_id",
+              "source_incarnation"
+            ],
+            "additionalProperties": false,
+            "description": "Host-derived applicability and source context; legacy is explicitly unscoped."
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Existing interaction record ID.",
+                  "minLength": 1
+                },
+                "sequence": {
+                  "type": "string",
+                  "description": "Positive canonical decimal record sequence, encoded as a string.",
+                  "pattern": "^[1-9][0-9]*$",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "description": "Digest binding the cited record.",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "incarnation": {
+                  "type": "string",
+                  "description": "Source incarnation of the cited record.",
+                  "minLength": 1
+                },
+                "availability": {
+                  "type": "string",
+                  "description": "Current retained evidence availability. This is not a correctness verdict and does not return the payload.",
+                  "enum": [
+                    "available",
+                    "unavailable",
+                    "changed"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "sequence",
+                "sha256",
+                "incarnation"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 16
+          },
+          "detail": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "selection": {
+                "type": "string",
+                "description": "Relevant combines current-task, explicit project-wide and reusable notes. Legacy selects unscoped compatibility notes. The host derives project/task; callers cannot supply their identifiers.",
+                "enum": [
+                  "relevant",
+                  "task",
+                  "project",
+                  "reusable",
+                  "legacy"
+                ],
+                "default": "relevant"
+              }
+            },
+            "required": [
+              "id",
+              "selection"
+            ],
+            "additionalProperties": false,
+            "description": "Call search with these arguments to retrieve an omitted body."
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "text_truncated",
+          "snippet",
+          "match",
+          "similarity",
+          "score",
+          "strength",
+          "time",
+          "accesses",
+          "attribution",
+          "ring",
+          "class",
+          "superseded_by",
+          "context",
+          "evidence"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 50
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "matched": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "shown": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "Some matches or full note bodies were omitted."
+    },
+    "text_truncated": {
+      "type": "boolean"
+    },
+    "text_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 16384
+    },
+    "text_budget_bytes": {
+      "type": "integer",
+      "enum": [
+        16384
+      ]
+    },
+    "result_truncated": {
+      "type": "boolean",
+      "description": "Whole trailing hits were omitted to keep the encoded result within its budget. Narrow the query or selection; this is not a continuation token."
+    },
+    "result_budget_bytes": {
+      "type": "integer",
+      "description": "Encoded result limit: 61440 for query/recent, 262144 for complete by-ID detail.",
+      "enum": [
+        61440,
+        262144
+      ]
+    },
+    "status": {
+      "type": "string",
+      "description": "Host lookup outcome. found_nothing is scoped to this request; it does not establish that all memories are empty."
+    },
+    "policy": {
+      "type": "string"
+    },
+    "selection": {
+      "type": "string",
+      "description": "Relevant combines current-task, explicit project-wide and reusable notes. Legacy selects unscoped compatibility notes. The host derives project/task; callers cannot supply their identifiers.",
+      "enum": [
+        "relevant",
+        "task",
+        "project",
+        "reusable",
+        "legacy"
+      ],
+      "default": "relevant"
+    },
+    "meaning": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "basis": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "detail",
+        "basis"
+      ],
+      "additionalProperties": false
+    },
+    "selection_context": {
+      "type": "object",
+      "description": "Host-reported selection and exact scope operands used by this read, including an empty result. Omitted when an older host does not provide it; never inferred from the caller or UI project. relevant with reason=no_session and no IDs searches reusable notes only.",
+      "properties": {
+        "selection": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "work_session_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Host-reported no_session explains relevant selection without an acting work session; other successful selections omit it."
+        }
+      },
+      "required": [
+        "selection"
+      ],
+      "additionalProperties": false
+    },
+    "empty_result": {
+      "type": "string",
+      "description": "Present for found_nothing with zero matched/shown notes. Explains that absence is limited to this request and selected plugin scope."
+    }
+  },
+  "required": [
+    "results",
+    "count",
+    "matched",
+    "shown",
+    "truncated",
+    "text_truncated",
+    "text_bytes",
+    "text_budget_bytes",
+    "result_truncated",
+    "result_budget_bytes",
+    "status",
+    "policy",
+    "selection"
+  ],
+  "additionalProperties": false
+}

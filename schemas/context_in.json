@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string", "maxLength": 2048},
+    "max_bytes": {"type": "integer", "minimum": 256, "maximum": 4096}
+  },
+  "required": ["query", "max_bytes"],
+  "additionalProperties": false
+}

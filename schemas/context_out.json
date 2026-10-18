@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "text": {"type": "string", "maxLength": 4096},
+    "detail_route": {"type": "string", "maxLength": 512}
+  },
+  "required": ["text", "detail_route"],
+  "additionalProperties": false
+}

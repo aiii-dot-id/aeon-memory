@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "recall input",
+  "description": "At least one of before_ms and after_ms is required. A pure read: temporal queries do not disturb the recency order.",
+  "type": "object",
+  "properties": {
+    "before_ms": {
+      "type": "integer",
+      "description": "Return notes with created_ms at or before this time."
+    },
+    "after_ms": {
+      "type": "integer",
+      "description": "Return notes with created_ms after this time."
+    },
+    "project": {
+      "type": "string",
+      "description": "Optional project scope."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10,
+      "description": "Maximum notes to return."
+    }
+  },
+  "additionalProperties": false
+}

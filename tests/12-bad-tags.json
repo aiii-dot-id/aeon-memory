@@ -1,0 +1,14 @@
+{
+  "name": "a tag that is not a string is refused",
+  "operation": "store",
+  "arguments": {
+    "content": "numbers are not tags",
+    "tags": [
+      1
+    ]
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}

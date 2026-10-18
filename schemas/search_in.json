@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "search in",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Text to find. Use exactly one of query, id or recent=true.",
+      "minLength": 1
+    },
+    "id": {
+      "type": "string",
+      "description": "Read one complete host note, including visible supersession. Use exactly one selector; old integer IDs belong to legacy get.",
+      "minLength": 1
+    },
+    "recent": {
+      "type": "boolean",
+      "description": "Set true to enumerate recent relevant notes without reinforcement. False is refused; use exactly one selector."
+    },
+    "selection": {
+      "type": "string",
+      "description": "Relevant combines current-task, explicit project-wide and reusable notes using the host-derived acting work session. Without that session it searches reusable notes only; a selected UI project is not sufficient. Legacy selects unscoped compatibility notes. Read selection_context in the result for the actual scope.",
+      "enum": [
+        "relevant",
+        "task",
+        "project",
+        "reusable",
+        "legacy"
+      ],
+      "default": "relevant"
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum results for query or recent; unavailable with id.",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 5
+    },
+    "exact": {
+      "type": "boolean",
+      "default": false,
+      "description": "Exact word matching, available only with query."
+    }
+  },
+  "required": [],
+  "additionalProperties": false,
+  "description": "Exactly one of query, id or recent=true is required. This cross-field requirement is checked by the operation; all argument types and bounds are declared here."
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Absent host-ID lookup is explicit",
+  "operation": "search",
+  "arguments": {
+    "id": "pm_absent",
+    "selection": "legacy"
+  },
+  "expect": {
+    "status": "succeeded",
+    "result_contains": [
+      "\"count\":0",
+      "\"status\":\"found_nothing\"",
+      "\"results\":[]"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "store refuses project with a named reason",
+  "operation": "store",
+  "arguments": {
+    "content": "scope me",
+    "project": "memory"
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}
