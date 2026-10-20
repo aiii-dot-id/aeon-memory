@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -15,7 +16,7 @@ const contextResultLimit = 4096
 
 func describeContext(p *sdk.Plugin) {
 	p.Describe("context", sdk.Descriptor{
-		Summary: "Preview one possibly applicable working note before a decision. Uses bounded indexed any-word search under the host's read-only context scope, without reinforcement or embeddings. Empty means no eligible match among the returned candidates, not proof that no useful memory exists.",
+		Summary: "Preview one possibly applicable note for the host's read at a decision: turn start, work start, or after a failed call. Uses bounded indexed any-word search under the host's read-only context scope, without reinforcement or embeddings. Empty means no eligible match among the returned candidates, not proof that no useful memory exists.",
 		Context: true, Input: "schemas/context_in.json", Output: "schemas/context_out.json",
 		Effects: sdk.EffectsReadInternal, Capabilities: []string{memoryCapability},
 		MaxResultBytes: contextResultLimit, Family: family,
@@ -104,21 +105,26 @@ func contextResult(rr sdk.RecallResult, terms map[string]bool, selection string,
 	if len(route) > 512 {
 		return nil, sdk.Fail("MEMORY_RESULT_INVALID", "context detail route exceeds its bound")
 	}
-	header := "One possibly applicable note from " + strconv.Itoa(rr.Shown) + " of " + strconv.Itoa(rr.Matched) + " scoped query matches returned; selection is bounded and may miss useful notes. Lexical overlap is not proof of usefulness. Check the conditions against current instructions and evidence.\n" +
-		"Memory=" + strconv.Quote(h.ID) + "; applicability=" + strconv.Quote(h.Context.Applicability) + "; project=" + strconv.Quote(h.Context.ProjectID) + "; originating_task=" + strconv.Quote(h.Context.WorkSessionID) + "; source=" + strconv.Quote(h.Context.SourceIncarnation) + "; recorded=" + strconv.Quote(h.Time) + ".\n"
-	if len(h.Evidence) == 0 {
-		header += "No structured evidence is attached; this is an unverified working note.\n"
-	} else {
-		header += strconv.Itoa(len(h.Evidence)) + " attached evidence references are currently available. Availability does not establish correctness. Exact references are returned by the detail route.\n"
+
+	recorded := h.Time
+	if t, err := time.Parse(time.RFC3339Nano, h.Time); err == nil {
+		recorded = t.UTC().Format("2006-01-02")
 	}
-	out := map[string]any{"text": header + "Stored note (fallible Ring 4 data):\n" + h.Text, "detail_route": route}
+	evidence := "no evidence attached"
+	if n := len(h.Evidence); n == 1 {
+		evidence = "1 evidence reference attached"
+	} else if n > 1 {
+		evidence = strconv.Itoa(n) + " evidence references attached"
+	}
+	header := "Your note, recorded " + recorded + " (applicability " + h.Context.Applicability + "; " + evidence + "). It shares words with this request and may be wrong or out of date; the detail route reads it whole.\n"
+	out := map[string]any{"text": header + h.Text, "detail_route": route}
 	n, err := sdk.ResultSize(out)
 	if err != nil {
 		return nil, err
 	}
 	if n > budget {
 
-		out["text"] = header + "The complete note body is omitted because it exceeds the context budget. Use the detail route before applying it."
+		out["text"] = header + "Its body is too long for this preview; read it through the detail route before applying it."
 		n, err = sdk.ResultSize(out)
 		if err != nil {
 			return nil, err
@@ -152,4 +158,4 @@ func contextTerms(text string) map[string]bool {
 	return terms
 }
 
-const contextStopWords = " the and for with this that these those from into onto have has had are was were will would should could can may must not only when where what which who how then than but also before after during once please use using used task work project current prior previous next check checks run running result results file files read write update change changes need needs make keep all any some each their there here your you our its does done doing about through without within based instead both first second return returned "
+const contextStopWords = " the and for with this that these those from into onto have has had are was were will would should could can may must not only when where what which who how then than but also before after during once please use using used task work project current prior previous next need needs make keep all any some each their there here your you our its does done doing about through without within based instead both first second return returned "

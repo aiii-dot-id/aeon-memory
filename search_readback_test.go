@@ -33,7 +33,7 @@ func TestSearchWarningsSurviveNativeTransportWithoutChangingTheLookup(t *testing
 			hits := []any{}
 			status := "found_nothing"
 			if !selector.miss {
-				hit := fakeMemoryHit(&fakeMemory{ID: "pm_first", Text: "Keep the tested command with its conditions."}, "fuzzy", 0.75)
+				hit := fakeMemoryHit(&fakeMemory{ID: "pm_first", Applicability: "reusable", Text: "Keep the tested command with its conditions."}, "fuzzy", 0.75)
 				hits = append(hits, hit)
 				status = "found"
 			}
@@ -172,10 +172,10 @@ func TestSearchNoSessionExplanationRequiresTheExactTrustedScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			text, ok := got["empty_result"].(string)
-			if !ok || strings.Contains(text, "reusable notes only; task and project notes were not searched") != tc.want {
+			if !ok || strings.Contains(text, "only reusable notes were searched; task and project notes were not") != tc.want {
 				t.Fatalf("unearned or missing no-session explanation: %v", got)
 			}
-			if !strings.Contains(text, "selected host-memory scope") || !strings.Contains(text, "no placeholder note is needed") {
+			if !strings.Contains(text, "No note matched") || !strings.Contains(text, "No placeholder note is needed") {
 				t.Fatalf("limited empty-result meaning lost: %v", got)
 			}
 			if got["status"] != "found_nothing" || got["matched"] != 0 || got["shown"] != 0 {

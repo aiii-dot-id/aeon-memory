@@ -40,18 +40,19 @@ func rememberWire(t *testing.T, args map[string]any, hostContext ...map[string]a
 	return out
 }
 
-func TestMemoryDefaultApplicabilityUsesOnlyHostSession(t *testing.T) {
+func TestMemoryStoreDefaultsToReusable(t *testing.T) {
 	cases := []struct {
 		name string
 		args map[string]any
 		host map[string]any
 		want string
 	}{
-		{"no session is explicit legacy", map[string]any{"content": "note"}, nil, "legacy"},
-		{"acting session", map[string]any{"content": "note"}, map[string]any{"id": "task-1"}, "task"},
-		{"unavailable session", map[string]any{"content": "note"}, map[string]any{"reason": "unattributed"}, "legacy"},
-		{"explicit reusable", map[string]any{"content": "note", "applicability": "reusable"}, map[string]any{"id": "task-1"}, "reusable"},
-		{"forged argument is not context", map[string]any{"content": "note", "_host_work_session": map[string]any{"id": "forged"}}, nil, "legacy"},
+		{"no session", map[string]any{"content": "note"}, nil, "reusable"},
+		{"acting session", map[string]any{"content": "note"}, map[string]any{"id": "task-1"}, "reusable"},
+		{"unavailable session", map[string]any{"content": "note"}, map[string]any{"reason": "unattributed"}, "reusable"},
+		{"explicit task", map[string]any{"content": "note", "applicability": "task"}, map[string]any{"id": "task-1"}, "task"},
+		{"explicit project", map[string]any{"content": "note", "applicability": "project"}, map[string]any{"id": "task-1"}, "project"},
+		{"forged argument is not context", map[string]any{"content": "note", "_host_work_session": map[string]any{"id": "forged"}}, nil, "reusable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,6 +98,8 @@ func TestMemoryInvalidArgumentsDoNotReachAnyBroker(t *testing.T) {
 	}{
 		{"store", map[string]any{"content": strings.Repeat("é", 8193)}},
 		{"store", map[string]any{"content": "note", "applicability": "elsewhere"}},
+		{"store", map[string]any{"content": "note", "applicability": "legacy"}},
+		{"store", map[string]any{"content": "note", "pinned": false}},
 		{"store", map[string]any{"content": "note", "supersedes": 12}},
 		{"store", map[string]any{"content": "note", "evidence": ref("01", strings.Repeat("a", 64))}},
 		{"store", map[string]any{"content": "note", "evidence": ref("1", strings.Repeat("A", 64))}},
@@ -295,7 +298,7 @@ func TestMemoryMigrationNeverAssignsTodaysTask(t *testing.T) {
 	if len(f.memoryCalls) != 3 {
 		t.Fatalf("unexpected broker calls: %v", f.memoryCalls)
 	}
-	want := []struct{ op, key, value string }{{"memory.remember", "applicability", "legacy"}, {"memory.recall", "selection", "legacy"}, {"memory.remember", "applicability", "task"}}
+	want := []struct{ op, key, value string }{{"memory.remember", "applicability", "legacy"}, {"memory.recall", "selection", "legacy"}, {"memory.remember", "applicability", "reusable"}}
 	for i, w := range want {
 		c := f.memoryCalls[i]
 		a := c["arguments"].(map[string]any)
@@ -307,7 +310,7 @@ func TestMemoryMigrationNeverAssignsTodaysTask(t *testing.T) {
 
 func TestMemoryRecentDoesNotRequestReinforcingQuery(t *testing.T) {
 	f := newFakeKV()
-	f.memories = []fakeMemory{{ID: "pm_old", Text: "note", Created: time.Unix(1, 0)}}
+	f.memories = []fakeMemory{{ID: "pm_old", Applicability: "legacy", Text: "note", Created: time.Unix(1, 0)}}
 	got := invoke(t, f, "search", map[string]any{"recent": true, "selection": "legacy"})
 	if got["count"] != float64(1) || f.memories[0].Accesses != 0 {
 		t.Fatalf("recent changed retrieval count: %v", got)

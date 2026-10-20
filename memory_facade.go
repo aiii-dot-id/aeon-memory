@@ -25,22 +25,17 @@ func rememberArguments(c sdk.Call) (string, []sdk.RememberOption, error) {
 	if !utf8.ValidString(content) || len(content) > memoryTextBudget {
 		return "", nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "content must be valid UTF-8 and at most 16384 bytes")
 	}
-	if pinned, _ := a.Bool("pinned"); pinned {
-		return "", nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "pinned is unsupported on host memory; legacy pins remain available through get and update")
-	}
-	for _, name := range []string{"tags", "project"} {
+	for _, name := range []string{"pinned", "tags", "project"} {
 		if a.Has(name) {
-			return "", nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", name+" is unsupported on host memory; use applicability with host-derived context, or explicit legacy working-set access")
+			return "", nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", name+" is not a store argument; applicability chooses the scope and the host supplies the project and task")
 		}
 	}
-	applicability := "legacy"
-	if c.WorkSession().ID != "" {
-		applicability = "task"
-	}
+
+	applicability := "reusable"
 	if a.Has("applicability") {
 		applicability, ok = a.String("applicability")
-		if !ok || !memoryApplicabilityValid(applicability) {
-			return "", nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "applicability must be task, project, reusable or legacy")
+		if !ok || !(applicability == "task" || applicability == "project" || applicability == "reusable") {
+			return "", nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", "applicability must be task, project or reusable; older unscoped notes are read with search selection=legacy")
 		}
 	}
 	opts := []sdk.RememberOption{sdk.MemoryApplicability(applicability)}
@@ -85,13 +80,6 @@ func rememberArguments(c sdk.Call) (string, []sdk.RememberOption, error) {
 	return content, opts, nil
 }
 
-func memoryApplicabilityValid(value string) bool {
-	switch value {
-	case "task", "project", "reusable", "legacy":
-		return true
-	}
-	return false
-}
 func positiveSequence(s string) bool {
 	if s == "" || s[0] == '0' {
 		return false
@@ -122,13 +110,13 @@ func recallArguments(c sdk.Call) (string, string, bool, []sdk.RecallOption, erro
 		return "", "", false, nil, sdk.Fail("OPERATION_ARGUMENT_INVALID", reason)
 	}
 	if a.Has("project") {
-		return invalid("project cannot supply host context; choose selection=project or use legacy recent(project=...) and get")
+		return invalid("project is not a search argument; selection=project searches the acting work session's project")
 	}
 	selection := "relevant"
 	if a.Has("selection") {
 		var ok bool
 		selection, ok = a.String("selection")
-		if !ok || !(selection == "relevant" || memoryApplicabilityValid(selection)) {
+		if !ok || !(selection == "relevant" || selection == "task" || selection == "project" || selection == "reusable" || selection == "legacy") {
 			return invalid("selection must be relevant, task, project, reusable or legacy")
 		}
 	}
@@ -267,9 +255,9 @@ func recallResult(rr sdk.RecallResult, selection string, byID bool) (map[string]
 		out["selection_context"] = context
 	}
 	if rr.Status == "found_nothing" && rr.Matched == 0 && rr.Shown == 0 {
-		out["empty_result"] = "No notes matched this request in this plugin's selected host-memory scope. Other projects, selections, core memory or the legacy KV working set may contain notes. Store only a useful finding supported by actual work; no placeholder note is needed."
+		out["empty_result"] = "No note matched in this selection; other selections and your own recall were not searched. No placeholder note is needed."
 		if scope := rr.SelectionContext; selection == "relevant" && scope != nil && scope.Selection == "relevant" && scope.Reason == "no_session" && scope.ProjectID == "" && scope.WorkSessionID == "" {
-			out["empty_result"] = "No notes matched this request in this plugin's selected host-memory scope. The host reported no acting work session, so relevant searched reusable notes only; task and project notes were not searched. A selected UI project alone does not supply work context. Other selections, core memory or the legacy KV working set may contain notes. Store only a useful finding supported by actual work; no placeholder note is needed."
+			out["empty_result"] = "No note matched. With no open work session, only reusable notes were searched; task and project notes were not. No placeholder note is needed."
 		}
 	}
 	if cut && rr.Status == "found" {

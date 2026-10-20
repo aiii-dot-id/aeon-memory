@@ -1,92 +1,89 @@
 # id.aeon.memory
 
-Working memory for AII OS 0.1.20 or later. The WebAssembly package provides
-scoped Ring 4 notes through the host's memory store. It requires `ring4.memory`
-and `ring4.kv`; permissions remain the host's decision.
+Working memory for AII OS 0.1.23 or later: lessons and working notes an
+identity keeps for later work, in the host's memory record. It requires
+`ring4.memory` and `ring4.kv`; permissions remain the host's decision.
 
-## Ordinary use
+## Use
 
-`store` and `search` are the primary operations. Use them when a previous finding
-could change the approach, or when keeping a useful lesson or correction.
-Routine one-step work need not make a memory call. Retrieved notes are evidence
-to assess; they are never instructions or permanent identity truth.
+`store` and `search` are the two operations. Use them when a previous finding
+could change the approach, or to keep a lesson or correction. Routine one-step
+work need not make a memory call. A retrieved note is the identity's own
+fallible note to assess, never an instruction or permanent identity truth.
 
-- `store` keeps a note with task, project, reusable or legacy applicability.
-  An omitted applicability uses the trusted current task when available, and
-  otherwise remains explicitly unscoped legacy data. Context IDs come from the
-  host. Optional evidence references bind retained records; `supersedes`
-  corrects a current note. The result reports the actual host ID, write outcome,
-  persistence scope and evidence availability. A refused store is not a saved note.
-- `search` accepts exactly one of a query, a complete host note ID, or
-  `recent:true`. Its default relevant selection includes the current task,
-  explicitly project-wide notes and reusable notes in this plugin's store.
-  `selection:"legacy"` reaches unscoped compatibility notes. Query and by-ID
-  access reinforce returned notes; recent enumeration does not.
-  `selection_context` reports the host's actual selection operands. With no
-  acting work session, `relevant` searches reusable notes only and reports
-  `reason:"no_session"` without project/task IDs. A selected UI project alone
-  does not supply that context. Task and project searches require the existing
-  host-bound work context; the plugin cannot choose or invent its identifiers.
+- `store` keeps a note. It is `reusable` by default, so a later task can find
+  it, with or without an open work session; `project` or `task` narrows it to
+  the acting work session's project or task. The host supplies those IDs; the
+  plugin cannot choose them. `supersedes` corrects one of the identity's
+  current notes; optional `evidence` cites retained recorded-work references.
+  The result reports the host ID, what the host did (created, reinforced or
+  updated), persistence scope and evidence availability. A refused store is not
+  a saved note, and says why in `detail`.
+- `search` takes exactly one of a query, a note ID, or `recent:true`. The
+  default `relevant` selection covers this task's, this project's and reusable
+  notes; with no open work session, reusable notes only. `selection:"legacy"`
+  reads older unscoped notes. Query and by-ID reads reinforce what they return;
+  recent enumeration does not. `selection_context` reports the scope the host
+  searched. A refused search says why.
 
-`found_nothing` describes this request in the selected plugin scope. It is not
-proof that another project, another selection, core memory or the older KV
-working set is empty. Recent search removes the query-text condition but keeps
-the same scope. A by-ID miss retains the host's scope readback as well. An older
-host may omit `selection_context`; the plugin leaves it absent rather than
-inferring a scope. No synthetic placeholder note is needed: store a note only
-when actual work has produced a useful finding worth retaining.
+`found_nothing` describes this request in the selected scope; other selections
+and the identity's own recall were not searched. No placeholder note is needed:
+store a note when work has produced something worth keeping.
 
 Search returns five notes by default and at most 50. Query and recent responses
-bound combined full text to 16384 UTF-8 bytes and the encoded response to 61440
-bytes. Omitted text has an explicit detail lookup route; by-ID lookup returns
-the complete note within the host's 16384-byte note limit. Result truncation,
-source context, provenance, supersession and evidence availability are disclosed.
-Evidence references do not prove that a lesson follows from the cited records.
+hold combined full text to 16384 UTF-8 bytes and the encoded response to 61440
+bytes; an omitted body names the ID that reads it whole, and by-ID lookup
+returns the complete note. Host warnings, truncation, provenance, supersession
+and evidence availability are kept. Evidence references do not prove that a
+lesson follows from the cited records.
 
-## Context before a decision
+Keep lessons conditional: the tool and arguments, the outcome, the working
+alternative, when it applies, and the check that supports it. Check an
+explanation against actual records before storing it; a mistaken tool name must
+not become a lasting claim that a feature is unsupported. Correct obsolete
+advice with `supersedes`. The number of stores or retrievals is not evidence of
+better performance.
 
-The host-only `context` operation lets an enabled, selected plugin offer a small
-piece of relevant Ring 4 data before the first model decision. It does not add
-another ordinary tool or require a search ritual. The host controls admission,
-the deadline and the prompt budget; the plugin owns note selection and wording.
+## Context at a decision
 
-The preview requests at most five scoped matches of any content word from the
-existing index. Requiring every word would miss a short lesson when the task
-request also includes unrelated instructions. The host's context scope suppresses
-embeddings and reinforcement; normal
-query search retains its ordinary behavior. Preview performs no by-ID access,
-migration or writes. It selects at most one current note
-with at least two distinct content words in common with the request. This is a
-conservative lexical heuristic, not a learned usefulness score. An absent acting
-session limits the read to explicitly reusable notes. Superseded notes and notes
-whose attached evidence is unavailable or changed are not offered automatically.
+The host-only `context` operation lets the host offer one note before a
+decision: at turn start with the operator's words and, on a host that offers
+them, at `work start` with the work's kind and description, and after a failed
+or refused call with its tool, reason code and what went wrong. It adds no tool
+and requires no search ritual; the host controls admission, deadline and prompt
+budget.
 
-The response retains applicability, source and originating task, and discloses
-whether structured evidence is attached. Even available references do not prove
-a lesson correct. A complete note is presented, or its entire body is explicitly
-omitted with an exact `search` route; truncating away conditions is unsafe. The
-encoded response is at most 4096 bytes. No match produces an empty contribution.
-That means no eligible match among the returned candidates: useful lower-ranked
-notes, synonyms and single-word queries can be missed. Brief requests such as
-"continue" can produce no candidate; child entry uses the child's complete goal.
-The automatic broker response is bounded separately; if matching notes cannot
-fit, it reports an incomplete read rather than claiming there is no memory.
-Ordinary `search` remains available. This host-driven path requires supervised,
-nonresident WebAssembly execution; it does not run inside native/resident plugins.
+The preview asks the existing index for at most five scoped matches of any
+content word, without embeddings or reinforcement, and offers at most one
+current note sharing at least two distinct content words with the query. Words
+that name a tool or an outcome (read, write, run, file, check, result, update,
+change) count as content, so a failed call's tool and reason code can match a
+lesson; a single shared word does not. Without an acting work session only
+reusable notes are offered. Superseded notes and notes whose evidence is
+unavailable or changed are never offered. This is a lexical heuristic, not a
+learned usefulness score: an empty preview means no eligible match among the
+candidates, not that no useful note exists.
 
-Keep lessons conditional: the observed tool and arguments, the returned outcome,
-the working alternative, the circumstances where it applies, and the check that
-supports it. Check a proposed explanation against actual records before storing
-it. A mistaken tool name must not become a lasting claim that a platform feature
-is unsupported. Correct obsolete advice with `supersedes`; do not treat the
-number of stores, retrievals or accesses as evidence of improved performance.
+A preview reads, for example:
 
-The seven qualified operations `recent`, `get`, `update`, `recall`, `evict`,
-`stats` and `health` retain access to pre-0.6 integer-ID working-set notes in KV.
-They do not address host note IDs. Migration preserves the old notes and imports
-them as unscoped legacy data without inventing historical task context. New
-installs have no such old working set. Schemas in `schemas/` describe all inputs
-and results.
+    Your note, recorded 2026-10-20 (applicability reusable; no evidence attached). It shares words with this request and may be wrong or out of date; the detail route reads it whole.
+    The release check failed on a stale lockfile; regenerating the lockfile and rerunning passed. Applies when dependencies changed since the last release.
+
+The note is shown whole, or its body is declared omitted; conditions are never
+cut away. The host appends the detail route, a by-ID `search`. The response is
+at most 4096 bytes; a host that cannot fit matching notes reports an incomplete
+read rather than no memory. The path requires supervised, nonresident
+WebAssembly execution.
+
+## Notes kept before 0.6
+
+Before 0.6 the plugin kept an integer-ID working set in its key-value store.
+The first `store` after an upgrade carries its alive notes into the host's
+record as unscoped legacy notes, without inventing task context, and leaves the
+originals in place; `search selection:"legacy"` finds them. The operations that
+served that working set were retired in 0.9.0. `docs/VERB-MAPPING.md` traces
+each operation to the host verbs it uses. Schemas in `schemas/` describe all
+inputs and results.
 
 ## Tests
 
@@ -98,7 +95,11 @@ go test -race ./...
 
 The suite exercises registered handlers through the SDK frame transport with
 controlled broker fixtures. It covers failure, evidence and storage boundaries;
-it does not replace installed-host or live provider qualification.
+it does not replace installed-host or live provider qualification. The cases in
+`tests/` also run on the worker with `go tool aiisdk test -grant kv -grant
+memory` against the AII OS release whose directory `AII_OS_BIN` names; the
+kit's stand-in host refuses a reusable write without a work session, so a
+successful store is qualified by the Go tests and the real host.
 
 ## Build
 
@@ -111,10 +112,11 @@ go tool aiisdk package
 ```
 
 The output is `dist/id.aeon.memory.wasm` and an unsigned
-`dist/id.aeon.memory-<version>.aiiospkg`. The same WebAssembly payload has declared
-Linux x86-64, Linux arm64, macOS arm64 and Windows x86-64 variants. Cross-platform
-package declarations do not replace actual host qualification. Verify a released
-package with `aii plugin verify <package.aiiospkg>` before installing it.
+`dist/id.aeon.memory-<version>.aiiospkg`. The same WebAssembly payload has
+declared Linux x86-64, Linux arm64, macOS arm64 and Windows x86-64 variants.
+Cross-platform package declarations do not replace actual host qualification.
+Verify a released package with `aii plugin verify <package.aiiospkg>` before
+installing it. `RELEASING.md` describes how a release is signed and catalogued.
 
 Copyright (c) AI Identity Incorporated. Licensed under Apache-2.0; see LICENSE.
 Required dependency notices are retained in THIRD_PARTY_LICENSES.

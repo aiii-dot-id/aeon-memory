@@ -1,0 +1,12 @@
+{
+  "name": "store refuses legacy applicability with a named reason: older unscoped notes are read, not written",
+  "operation": "store",
+  "arguments": {
+    "content": "an unscoped note",
+    "applicability": "legacy"
+  },
+  "expect": {
+    "status": "failed",
+    "reason_code": "OPERATION_ARGUMENT_INVALID"
+  }
+}

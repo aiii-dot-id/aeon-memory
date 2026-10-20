@@ -1,15 +1,15 @@
 {
   "id": "id.aeon.memory",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "plugin_family": "tool_bridge",
   "publisher": "AI Identity Incorporated",
   "title": "Aeon Working Memory",
-  "description": "Scoped Ring 4 task notes and evidence-linked working lessons through host-backed store and search, with full-text lookup and honest truncation. Explicit legacy operations preserve pre-0.6 integer-ID notes. Notes are evidence to assess, not instructions or identity truth.",
+  "description": "Lessons and working notes an identity keeps for later work, through host-backed store and search: reusable by default, evidence-linked, full text with honest truncation, and one matching note the host can offer at a decision. Notes are evidence to assess, not instructions or identity truth.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/aiii-dot-id/aeon-memory",
   "interface": {
     "id": "id.aeon.memory.core",
-    "version": 5
+    "version": 6
   },
   "capability_envelope": [
     "ring4.kv",
@@ -65,5 +65,5 @@
       ]
     }
   ],
-  "aiios_min_version": "0.1.20"
+  "aiios_min_version": "0.1.23"
 }

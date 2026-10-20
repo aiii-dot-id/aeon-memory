@@ -10,16 +10,16 @@
     },
     "id": {
       "type": "string",
-      "description": "Read one complete host note, including visible supersession. Use exactly one selector; old integer IDs belong to legacy get.",
+      "description": "Read one complete note by its ID, including what superseded it. Use exactly one selector.",
       "minLength": 1
     },
     "recent": {
       "type": "boolean",
-      "description": "Set true to enumerate recent relevant notes without reinforcement. False is refused; use exactly one selector."
+      "description": "Set true to list recent notes without reinforcing them. False is refused; use exactly one selector."
     },
     "selection": {
       "type": "string",
-      "description": "Relevant combines current-task, explicit project-wide and reusable notes using the host-derived acting work session. Without that session it searches reusable notes only; a selected UI project is not sufficient. Legacy selects unscoped compatibility notes. Read selection_context in the result for the actual scope.",
+      "description": "Relevant covers this task's, this project's and reusable notes; without an open work session, reusable notes only. Legacy reads older unscoped notes. selection_context in the result names the scope the host searched.",
       "enum": [
         "relevant",
         "task",

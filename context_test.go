@@ -33,9 +33,14 @@ func TestContextSelectsOneConditionalLessonWithoutRewritingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := got["text"].(string)
-	for _, s := range []string{lesson, "project-a", "source-a", "prior-task", "1 attached evidence", "Availability does not establish correctness"} {
-		if !strings.Contains(text, s) {
-			t.Errorf("lost condition or provenance: %q", s)
+	want := "Your note, recorded 2026-01-01 (applicability project; 1 evidence reference attached). It shares words with this request and may be wrong or out of date; the detail route reads it whole.\n" + lesson
+	if text != want {
+		t.Errorf("context text:\n%s\nwant:\n%s", text, want)
+	}
+
+	for _, s := range []string{"pm_good", "project-a", "source-a", "prior-task", "incarnation", "originating"} {
+		if strings.Contains(text, s) {
+			t.Errorf("machinery in the preview: %q", s)
 		}
 	}
 	if strings.Contains(text, b.Text) || got["detail_route"] != `pl_id_aeon_memory_search({"id":"pm_good","selection":"relevant"})` {
@@ -84,7 +89,7 @@ func TestContextWholeBodyOrExplicitDetailNeverCutsAwayConditions(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := got["text"].(string)
-	if !strings.Contains(text, "1 of 90") || !strings.Contains(text, "complete note body is omitted") || strings.Contains(text, "é") || got["detail_route"] == "" {
+	if !strings.Contains(text, "too long for this preview") || strings.Contains(text, "é") || strings.Contains(text, "checksum") || got["detail_route"] == "" {
 		t.Fatal(got)
 	}
 	if n, err := sdk.ResultSize(got); err != nil || n > 4096 || !utf8.ValidString(text) {
@@ -158,5 +163,36 @@ func TestContextWithoutSessionCannotExposeProjectNote(t *testing.T) {
 	got, err := contextResult(contextReply(h), contextTerms(h.Text), "reusable", 4096)
 	if err != nil || !reflect.DeepEqual(got, emptyContext()) {
 		t.Fatalf("%v %v", got, err)
+	}
+}
+
+func TestContextMatchesAFailedCallByToolAndReason(t *testing.T) {
+	lesson := contextHit("pm_lesson", "write is refused outside the home; write inside it and move the file.")
+	lesson.Context = sdk.MemoryContext{Applicability: "reusable"}
+	other := contextHit("pm_other", "Write the release notes before tagging.")
+	other.Context = sdk.MemoryContext{Applicability: "reusable"}
+	readLesson := contextHit("pm_read", "read a file over the limit in parts, with offset and limit.")
+	readLesson.Context = sdk.MemoryContext{Applicability: "reusable"}
+	for _, tc := range []struct {
+		query string
+		hits  []sdk.RecallHit
+		want  string
+	}{
+		{"write PATH_REFUSED", []sdk.RecallHit{other, lesson}, "pm_lesson"},
+		{"write PATH_REFUSED", []sdk.RecallHit{other}, ""},
+		{"read FILE_TOO_LARGE", []sdk.RecallHit{readLesson}, "pm_read"},
+	} {
+		got, err := contextResult(contextReply(tc.hits...), contextTerms(tc.query), "reusable", 4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if route, _ := got["detail_route"].(string); (tc.want == "") != (route == "") || !strings.Contains(route, tc.want) {
+			t.Errorf("%q over %d notes: %v", tc.query, len(tc.hits), got)
+		}
+	}
+
+	f := newFakeKV()
+	if got := invoke(t, f, "context", map[string]any{"query": "write", "max_bytes": 4096}); !reflect.DeepEqual(got, emptyContext()) || len(f.memoryCalls) != 0 {
+		t.Fatalf("single-word query read memory: %v %v", got, f.memoryCalls)
 	}
 }

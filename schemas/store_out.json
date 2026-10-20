@@ -8,7 +8,7 @@
     },
     "id": {
       "type": "string",
-      "description": "Opaque host memory ID, distinct from legacy integer IDs."
+      "description": "Opaque host memory ID."
     },
     "outcome": {
       "type": "string",

@@ -5,23 +5,23 @@
   "properties": {
     "content": {
       "type": "string",
-      "description": "Complete note with conditions, result and caveats. Maximum16384 UTF-8 bytes, enforced at runtime.",
+      "description": "The whole lesson: what was tried, what happened, what worked and when it applies. At most 16384 UTF-8 bytes.",
       "minLength": 1,
       "maxLength": 16384
     },
     "applicability": {
       "type": "string",
-      "description": "Omitted: current trusted task when present, otherwise unscoped legacy. Explicit task/project require corresponding acting context. Reusable remains private to this identity and plugin.",
+      "description": "Reusable when omitted: any later task can find it, with or without an open work session. Project or task narrows it to the acting work session's project or task. Notes stay private to this identity and plugin.",
       "enum": [
         "task",
         "project",
-        "reusable",
-        "legacy"
-      ]
+        "reusable"
+      ],
+      "default": "reusable"
     },
     "supersedes": {
       "type": "string",
-      "description": "Current host memory ID to correct within the same applicability. A stale or foreign target is refused.",
+      "description": "ID of one of your current notes that this note corrects, in the same applicability. A stale or foreign target is refused.",
       "minLength": 1
     },
     "evidence": {

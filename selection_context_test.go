@@ -40,10 +40,10 @@ func TestSearchPreservesTrustedSelectionContextThroughNativeTransport(t *testing
 				t.Fatalf("empty lookup outcome changed: %v", got)
 			}
 			explanation, ok := got["empty_result"].(string)
-			if !ok || !strings.Contains(explanation, "selected host-memory scope") || !strings.Contains(explanation, "no placeholder note is needed") {
+			if !ok || !strings.Contains(explanation, "No note matched") || !strings.Contains(explanation, "No placeholder note is needed") {
 				t.Fatalf("empty result omits its limited meaning: %v", got)
 			}
-			if tc.context["selection"] == "relevant" && tc.context["reason"] == "no_session" && !strings.Contains(explanation, "reusable notes only; task and project notes were not searched") {
+			if tc.context["selection"] == "relevant" && tc.context["reason"] == "no_session" && !strings.Contains(explanation, "only reusable notes were searched; task and project notes were not") {
 				t.Fatalf("trusted no-session scope was not explained: %v", got)
 			}
 			checkFacadeSchema(t, "search", got)
@@ -77,7 +77,7 @@ func TestSearchDoesNotInventScopeForOlderHost(t *testing.T) {
 func TestFoundNoteDoesNotClaimAnEmptyResult(t *testing.T) {
 	f := newFakeKV()
 	stored := invoke(t, f, "store", map[string]any{"content": "Keep the tested command with its conditions."})
-	got := invoke(t, f, "search", map[string]any{"id": stored["id"], "selection": "legacy"})
+	got := invoke(t, f, "search", map[string]any{"id": stored["id"]})
 	if _, exists := got["empty_result"]; exists {
 		t.Fatal("found note was described as absent")
 	}
