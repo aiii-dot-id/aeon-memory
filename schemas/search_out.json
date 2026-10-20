@@ -231,6 +231,13 @@
     "policy": {
       "type": "string"
     },
+    "warnings": {
+      "type": "array",
+      "description": "Nonempty host warnings, preserved in host order without changing the lookup status. Omitted when the host reports none; an older host may omit them.",
+      "items": {
+        "type": "string"
+      }
+    },
     "selection": {
       "type": "string",
       "description": "Relevant combines current-task, explicit project-wide and reusable notes. Legacy selects unscoped compatibility notes. The host derives project/task; callers cannot supply their identifiers.",
@@ -288,7 +295,7 @@
     },
     "empty_result": {
       "type": "string",
-      "description": "Present for found_nothing with zero matched/shown notes. Explains that absence is limited to this request and selected plugin scope."
+      "description": "Present for found_nothing with zero matched/shown notes. Explains that absence is limited to this request and selected plugin scope. Only trusted relevant/no_session scope with no task/project IDs says that reusable notes alone were searched."
     }
   },
   "required": [

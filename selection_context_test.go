@@ -43,6 +43,9 @@ func TestSearchPreservesTrustedSelectionContextThroughNativeTransport(t *testing
 			if !ok || !strings.Contains(explanation, "selected host-memory scope") || !strings.Contains(explanation, "no placeholder note is needed") {
 				t.Fatalf("empty result omits its limited meaning: %v", got)
 			}
+			if tc.context["selection"] == "relevant" && tc.context["reason"] == "no_session" && !strings.Contains(explanation, "reusable notes only; task and project notes were not searched") {
+				t.Fatalf("trusted no-session scope was not explained: %v", got)
+			}
 			checkFacadeSchema(t, "search", got)
 			encoded, err := json.Marshal(got)
 			if err != nil {
